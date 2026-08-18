@@ -1,0 +1,6 @@
+-r requirements.txt
+
+pytest
+pytest-asyncio
+respx          # fake HTTP responses when testing health check workers
+ruff           # linting + formatting

@@ -1,0 +1,28 @@
+# Pin exact versions with `pip freeze > requirements.txt` once the stack is working.
+# Left loose here so the first install resolves cleanly.
+
+# API
+fastapi
+uvicorn[standard]
+pydantic-settings
+
+# Database
+sqlmodel
+psycopg2-binary
+alembic
+
+# Auth
+pyjwt
+passlib[bcrypt]
+python-multipart
+
+# Task queue
+celery[redis]==5.6.3
+redis
+
+# HTTP client for health checks
+httpx
+
+# Observability
+structlog
+prometheus-client
