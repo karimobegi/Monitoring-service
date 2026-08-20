@@ -40,3 +40,5 @@ celerybeat.pid
 *.sqlite3
 *.db
 postgres-data/
+
+.env
