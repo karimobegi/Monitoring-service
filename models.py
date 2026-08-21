@@ -20,18 +20,33 @@ class User(UserBase, table = True):
     default_factory=lambda: datetime.now(timezone.utc),
 )
 
-class Endpoint(SQLModel, table=True):
+class EndpointBase(SQLModel):
+    url: str
+    interval_seconds: int = 60
+
+class EndpointUpdate(SQLModel):
+    interval_seconds: int | None = None
+    is_active: bool | None = None
+    url: str | None = None
+
+class EndpointRead(EndpointBase):
+    id: int 
+    is_active: bool
+    next_check_at: datetime
+
+class EndpointCreate(EndpointBase):
+    pass
+
+class Endpoint(EndpointBase, table=True):
+
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(
     sa_column=Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     )
-    url: str
-    interval_seconds: int = 60
     is_active: bool = True
     next_check_at: datetime = Field(
     sa_column=Column(DateTime(timezone=True), nullable=False)
     )
-
     __table_args__ = (
         Index("ix_endpoint_due", "is_active", "next_check_at"),
     )

@@ -28,7 +28,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 DUMMY_HASH = password_hash.hash("dummypassword")#security
 
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], session: Annotated[Session, Depends(get_session)]):
+def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], session: Annotated[Session, Depends(get_session)]) -> User:
     credentials_exception = HTTPException(
         status_code = status.HTTP_401_UNAUTHORIZED,
         detail = "Could not validate credentials",
@@ -80,11 +80,3 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode["exp"] = expire
     encoded = jwt.encode(to_encode, SECRET_KEY, algorithm = ALGORITHM)
     return encoded
-
-
-
-    
-
-
-
-
