@@ -2,9 +2,9 @@ from fastapi import FastAPI, Depends
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 from dotenv import load_dotenv
 import os
-from app.models import User, Endpoint, EndpointCreate, EndpointUpdate
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
+from app.models import User, Endpoint
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://karimobegi@localhost:5432/uptime")

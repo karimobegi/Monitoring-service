@@ -1,15 +1,14 @@
-import time
 from celery import Celery
-from app.models import Endpoint, CheckResult
+from app.models import CheckResult
 from datetime import datetime, timezone
-from sqlmodel import create_engine, Session, SQLModel, Field, select, update, func
+from sqlmodel import Session
 import os
 from sqlalchemy import text
 from celery.signals import worker_process_init
-from app.db import engine
 import httpx
 from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
+from app.db import engine
 
 
 load_dotenv()
