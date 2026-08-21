@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 from sqlmodel import SQLModel
-from models import User, Endpoint, CheckResult
+from app.models import User, Endpoint, CheckResult
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from dotenv import load_dotenv
