@@ -1,7 +1,18 @@
 package com.uptime.dispatcher;
 
+import java.io.IOException;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.sql.SQLException;
 import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.net.ConnectException;
+import java.net.UnknownHostException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * One endpoint, one HTTP request, one result row. Runs on a probe pool thread;
@@ -15,6 +26,7 @@ public class ProbeTask implements Runnable {
     private final EndpointRepository repository;
     private final HttpClient httpClient;
     private final Duration timeout;
+    private static final Logger log = LoggerFactory.getLogger(ProbeTask.class);
 
     public ProbeTask(
             Endpoint endpoint,
@@ -46,8 +58,39 @@ public class ProbeTask implements Runnable {
      *  - Nothing catches what escapes this method. A pool thread dying from an
      *    uncaught exception is replaced silently by the pool.
      */
-    @Override
-    public void run() {
-        throw new UnsupportedOperationException("yours to write");
+@Override
+public void run() {
+    OffsetDateTime startedAt = OffsetDateTime.now();
+    long startNanos = System.nanoTime();
+    Integer statusCode = null;
+    String error = null;
+    Integer responseTimeMs = null;
+
+    try {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint.url()))
+                .timeout(timeout)
+                .GET()
+                .build();
+
+        HttpResponse<Void> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+
+        statusCode = response.statusCode();
+        responseTimeMs = (int) ((System.nanoTime() - startNanos) / 1_000_000);
+    }
+    catch (HttpTimeoutException e) { error = "timeout"; }
+    catch (ConnectException e) { error = "connection_refused"; }
+    catch (UnknownHostException e) { error = "dns_failure"; }
+    catch (IOException e) { error = "unknown"; }
+    catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+    }
+    try {
+        repository.insertResult(endpoint.id(), startedAt, statusCode, error, responseTimeMs);
+    } catch (SQLException e) {
+        log.error("failed to write result for endpoint={}", endpoint.id(), e);
+    }
     }
 }

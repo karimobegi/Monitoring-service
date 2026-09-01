@@ -70,6 +70,8 @@ public class Dispatcher implements Runnable {
                     log.warn("probe rejected, endpoint={} url={}", endpoint.id(), endpoint.url());
                 }
             }
+            log.info("tick complete, claimed={} queued={} rejectedTotal={}",
+            claim.size(), probePool.getQueue().size(), rejectedProbes.get());
         }
         catch(Exception e){
             log.error("dispatcher tick failed", e);

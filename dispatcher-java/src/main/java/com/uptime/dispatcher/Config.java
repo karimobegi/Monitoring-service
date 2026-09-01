@@ -49,7 +49,7 @@ public final class Config {
                 Duration.ofSeconds(envInt("DISPATCHER_HTTP_TIMEOUT_SECONDS", 5)),
                 envInt("DISPATCHER_PROBE_POOL_SIZE", 20),
                 envInt("DISPATCHER_PROBE_QUEUE_CAPACITY", 40),
-                envInt("DISPATCHER_CLAIM_BATCH_SIZE", 200));
+                envInt("DISPATCHER_CLAIM_BATCH_SIZE", 60));
     }
 
     private static String env(String key, String fallback) {

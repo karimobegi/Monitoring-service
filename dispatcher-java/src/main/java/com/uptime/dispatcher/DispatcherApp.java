@@ -3,8 +3,15 @@ package com.uptime.dispatcher;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
+
 import javax.sql.DataSource;
 import java.net.http.HttpClient;
+import java.time.Duration;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Assembles the object graph and starts the schedule. Does no work itself.
@@ -29,10 +36,28 @@ public final class DispatcherApp {
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
 
-        // TODO(you): construct the probe pool.
-        // TODO(you): construct the Dispatcher.
-        // TODO(you): construct the scheduler and start the schedule.
-        // TODO(you): register the shutdown hook.
+
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(config.probePoolSize, config.probePoolSize, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(config.probeQueueCapacity));
+
+        Dispatcher dispatcher = new Dispatcher(repository, pool, config.httpTimeout, httpClient);
+
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+        scheduler.scheduleAtFixedRate(dispatcher, 0, config.tickInterval.toSeconds(), TimeUnit.SECONDS);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            scheduler.shutdown();
+            pool.shutdown();
+                try {
+                    if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
+                        pool.shutdownNow(); 
+                    }
+                } catch (InterruptedException e) {
+                    pool.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }));
+
+
     }
 
     /**
