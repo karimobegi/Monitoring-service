@@ -1,6 +1,0 @@
-com/uptime/dispatcher/DispatcherApp.class
-com/uptime/dispatcher/Config.class
-com/uptime/dispatcher/ProbeTask.class
-com/uptime/dispatcher/Dispatcher.class
-com/uptime/dispatcher/EndpointRepository.class
-com/uptime/dispatcher/Endpoint.class
