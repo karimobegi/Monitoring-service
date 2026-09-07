@@ -6,6 +6,7 @@ from collections import defaultdict
 import redis.asyncio as redis
 import json
 import logging
+import asyncio
 
 
 from models import User
@@ -43,8 +44,31 @@ async def dashboard(websocket: WebSocket, user: User = Depends(ws_user)):
         for eid in ids:
             connections[eid].discard(websocket)
 
+async def redis_subscriber() -> None:
+    client = redis.from_url(REDIS_URL)
+    ps = client.pubsub()
+    await ps.subscribe("status")
+    try:
+        async for message in ps.listen():
+            if message["type"] != "message":
+                continue
+            try:
+                payload = json.loads(message["data"])
+                eid = payload["endpoint_id"]
+                for ws in list(connections.get(eid, set())):
+                    try:
+                        await ws.send_json(payload)
+                    except Exception:
+                        pass
+            except Exception:
+                logging.exception("bad pubsub message: %r", message["data"])
 
-                    
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await ps.unsubscribe()
+        await ps.aclose()
+        await client.aclose()
 
 
 

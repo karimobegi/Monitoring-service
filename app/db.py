@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
+
 from app.models import User, Endpoint
 
 load_dotenv()

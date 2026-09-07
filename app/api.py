@@ -3,11 +3,22 @@ from typing import Annotated
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
 from sqlalchemy.exc import IntegrityError
+import asyncio
+from contextlib import asynccontextmanager
+
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
 from app.db import get_session, add_endpoint, get_owned_endpoint, get_all_owned_endpoints, update_endpoint_in_db, delete_endpoint_in_db
 from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate
+from app.realtime import redis_subscriber, router as realtime_router
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(redis_subscriber())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(realtime_router)
 
 @app.post("/register", response_model=UserRead)
 def register(user_create: UserCreate, session: Session = Depends(get_session)):

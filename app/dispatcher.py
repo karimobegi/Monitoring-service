@@ -8,6 +8,7 @@ from celery.signals import worker_process_init
 import httpx
 from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
+
 from app.db import engine
 
 
