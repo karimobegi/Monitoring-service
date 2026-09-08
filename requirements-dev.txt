@@ -4,3 +4,4 @@ pytest
 pytest-asyncio
 respx          # fake HTTP responses when testing health check workers
 ruff           # linting + formatting
+aiosmtpd==1.4.6

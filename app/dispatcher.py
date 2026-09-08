@@ -1,27 +1,26 @@
-from celery import Celery
 from datetime import datetime, timezone
 from sqlmodel import Session, select, desc
 from sqlalchemy import text
-from celery.signals import worker_process_init
 import httpx
 from sqlalchemy.exc import OperationalError
 import logging
 
 from app.db import engine
 from app.events import publish_status_change
-from app.config import REDIS_URL
-from app.models import CheckResult, AlertConfig, AlertState
+from app.models import CheckResult, AlertConfig, AlertState, AlertChannel
+from app.celery_app import celery_app
+from app.alerts import send_email_alert, send_webhook_alert
 
 
-
-@worker_process_init.connect
-def init_worker(**kwargs):
-    engine.dispose()
-    
-celery_app = Celery(
-    "uptime",
-    broker=REDIS_URL,
-)
+def queue_alert(config: AlertConfig, endpoint_id: int, url: str,
+                timestamp: str, is_recovery: bool) -> None:
+    args = (config.target, endpoint_id, url, timestamp, is_recovery)
+    if config.channel == AlertChannel.EMAIL:
+        send_email_alert.delay(*args) #type: ignore
+    elif config.channel == AlertChannel.WEBHOOK:
+        send_webhook_alert.delay(*args) #type: ignore
+    else:
+        logging.warning("unknown alert channel %r on config %s", config.channel, config.id)
 
 @celery_app.task
 def dispatch_due_checks():
@@ -88,32 +87,17 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
 
             if is_up:
                 if state_row.alert_sent:
-                    #send recovery
-                    pass
+                    queue_alert(row, endpoint_id, url, checked_at, True)
+
                 state_row.current_streak = 0
                 state_row.alert_sent = False
             else:
                 state_row.current_streak += 1
                 if state_row.current_streak >= row.threshold and not state_row.alert_sent:
-                    #send alert
+                    queue_alert(row, endpoint_id, url, checked_at, False)
                     state_row.alert_sent = True
                     state_row.last_alert_at = datetime.now(timezone.utc)
 
             session.add(state_row)
         session.commit()
                 
-
-
-celery_app.conf.beat_schedule = {
-    "dispatch_due_checks": {
-        "task": "app.dispatcher.dispatch_due_checks",
-        "schedule": 10,
-    }
-}
-
-
-
-
-
-
-        
