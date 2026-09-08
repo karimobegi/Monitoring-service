@@ -1,7 +1,5 @@
 from fastapi import Depends, APIRouter, WebSocket, WebSocketDisconnect, Query, WebSocketException, status
 from sqlmodel import Session
-from dotenv import load_dotenv
-import os
 from collections import defaultdict
 import redis.asyncio as redis
 import json

@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Depends
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Session, create_engine, select
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 

@@ -2,7 +2,6 @@ from celery import Celery
 from app.models import CheckResult
 from datetime import datetime, timezone
 from sqlmodel import Session, select, desc
-import os
 from sqlalchemy import text
 from celery.signals import worker_process_init
 import httpx
