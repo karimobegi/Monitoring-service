@@ -1,15 +1,17 @@
 from celery import Celery
 from app.models import CheckResult
 from datetime import datetime, timezone
-from sqlmodel import Session
+from sqlmodel import Session, select, desc
 import os
 from sqlalchemy import text
 from celery.signals import worker_process_init
 import httpx
 from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
+import logging
 
 from app.db import engine
+from app.events import publish_status_change
 
 
 load_dotenv()
@@ -65,9 +67,25 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         status_code=None
         response_time_ms=None
     with Session(engine) as session:
+        prev_result = session.exec(select(CheckResult).where(CheckResult.endpoint_id == endpoint_id).order_by(desc(CheckResult.checked_at))).first()
+        prev_status = prev_result.status_code if prev_result is not None else None
         check_result = CheckResult(endpoint_id = endpoint_id, checked_at =datetime.fromisoformat(checked_at), status_code=status_code, error=error, response_time_ms=response_time_ms)
         session.add(check_result)
         session.commit()
+        if prev_result is not None and prev_status != status_code:
+            try:
+                publish_status_change(endpoint_id, status_code, checked_at)
+            except Exception:
+                logging.exception("error publishing")
+
+
+
+
+
+        
+
+
+
 
 celery_app.conf.beat_schedule = {
 "dispatch_due_checks": {"task": "dispatcher.dispatch_due_checks",

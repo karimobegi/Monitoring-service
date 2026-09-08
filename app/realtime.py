@@ -9,9 +9,9 @@ import logging
 import asyncio
 
 
-from models import User
-from db import get_all_owned_endpoints, engine
-from auth import user_from_token
+from app.models import User
+from app.db import get_all_owned_endpoints, engine
+from app.auth import user_from_token
 
 load_dotenv()
 REDIS_URL = os.environ["REDIS_URL"]
