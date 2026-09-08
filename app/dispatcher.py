@@ -38,7 +38,7 @@ def dispatch_due_checks():
         session.commit()
 
     for row in rows:
-        perform_check.apply_async(args=[row.id, row.url, probe_time.isoformat()])
+        perform_check.apply_async(args=[row.id, row.url, probe_time.isoformat()]) #type: ignore
 
 @celery_app.task(
     autoretry_for=(OperationalError,),

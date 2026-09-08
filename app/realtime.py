@@ -10,7 +10,7 @@ import asyncio
 from app.models import User
 from app.db import get_all_owned_endpoints, engine
 from app.auth import user_from_token
-from app.config import REDIS_URL
+from app.config import REDIS_URL, STATUS_CHANNEL
 
 
 router = APIRouter()
@@ -44,7 +44,7 @@ async def dashboard(websocket: WebSocket, user: User = Depends(ws_user)):
 async def redis_subscriber() -> None:
     client = redis.from_url(REDIS_URL)
     ps = client.pubsub()
-    await ps.subscribe("status")
+    await ps.subscribe(STATUS_CHANNEL)
     try:
         async for message in ps.listen():
             if message["type"] != "message":
