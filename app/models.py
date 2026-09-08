@@ -1,6 +1,11 @@
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index
+from enum import Enum
+
+class AlertChannel(str, Enum):
+    EMAIL = "email"
+    WEBHOOK = "webhook"
 
 class UserBase(SQLModel):
     email: str = Field(unique = True, index = True)
@@ -64,8 +69,33 @@ class CheckResult(SQLModel, table = True):
     error: str | None #timeout, dns_failure, connection_refused, or NULL if success
     response_time_ms: int | None #NULL if failure
 
+class AlertConfig(SQLModel, table=True):
+    id: int | None = Field(default = None, primary_key=True)
+    user_id: int = Field(
+    sa_column=Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    )
+    endpoint_id: int = Field(
+    sa_column=Column(Integer, ForeignKey("endpoint.id", ondelete="CASCADE"), nullable=False, index=True)
+    )
+    threshold: int = Field(default = 3)
+    channel: AlertChannel
+    target: str
+    is_active: bool = Field(default = True)
 
-    
+class AlertState(SQLModel, table=True):
+    id: int | None = Field(default = None, primary_key=True)
+    config_id: int = Field(
+        sa_column=Column(Integer, ForeignKey("alertconfig.id", ondelete="CASCADE"), nullable=False, index=True, unique = True)
+        )
+    current_streak: int = Field(default=0)
+    alert_sent: bool = Field(default=False)
+    last_alert_at: datetime | None = Field(
+    default=None,
+    sa_column=Column(DateTime(timezone=True), nullable=True)
+    )   
+
+
+
 
 
 
