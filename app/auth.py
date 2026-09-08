@@ -6,23 +6,16 @@ import jwt
 from pwdlib import PasswordHash
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from dotenv import load_dotenv
-import os
 from sqlmodel import Session, select
 
 from app.db import get_session
 from app.models import User
-
-
+from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+ACCESS_TOKEN_EXPIRE_TIME = timedelta(ACCESS_TOKEN_EXPIRE_MINUTES)
 
 class Token(BaseModel):
     access_token: str
     token_type: str
-
-load_dotenv()
-SECRET_KEY = os.environ["SECRET_KEY"]
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")))
 
 password_hash = PasswordHash.recommended()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -80,7 +73,7 @@ def authenticate_user(email: str, password: str, session: Session):
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if not(expires_delta):
-        expires_delta = ACCESS_TOKEN_EXPIRE_MINUTES
+        expires_delta = ACCESS_TOKEN_EXPIRE_TIME
     
     expire = expires_delta + datetime.now(timezone.utc)
     to_encode["exp"] = expire

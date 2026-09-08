@@ -7,14 +7,13 @@ from sqlalchemy import text
 from celery.signals import worker_process_init
 import httpx
 from sqlalchemy.exc import OperationalError
-from dotenv import load_dotenv
 import logging
 
 from app.db import engine
 from app.events import publish_status_change
+from app.config import REDIS_URL
 
 
-load_dotenv()
 
 @worker_process_init.connect
 def init_worker(**kwargs):
@@ -22,7 +21,7 @@ def init_worker(**kwargs):
     
 celery_app = Celery(
     "uptime",
-    broker=os.environ["REDIS_URL"],
+    broker=REDIS_URL,
 )
 
 @celery_app.task
@@ -88,10 +87,11 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
 
 
 celery_app.conf.beat_schedule = {
-"dispatch_due_checks": {"task": "dispatcher.dispatch_due_checks",
-		"schedule": 10
-        }
+    "dispatch_due_checks": {
+        "task": "app.dispatcher.dispatch_due_checks",
+        "schedule": 10,
     }
+}
 
 
 

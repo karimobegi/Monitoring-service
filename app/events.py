@@ -1,11 +1,9 @@
 import redis
-from dotenv import load_dotenv
-import os
 import json
 
+from app.config import REDIS_URL
 
-load_dotenv()
-REDIS_URL = os.environ["REDIS_URL"]
+
 client = redis.Redis.from_url(REDIS_URL)
 
 def publish_status_change(endpoint_id: int, status_code: int | None, checked_at: str) -> None:

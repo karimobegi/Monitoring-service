@@ -12,9 +12,8 @@ import asyncio
 from app.models import User
 from app.db import get_all_owned_endpoints, engine
 from app.auth import user_from_token
+from app.config import REDIS_URL
 
-load_dotenv()
-REDIS_URL = os.environ["REDIS_URL"]
 
 router = APIRouter()
 connections: dict[int, set[WebSocket]] = defaultdict(set)

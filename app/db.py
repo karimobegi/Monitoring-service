@@ -1,16 +1,12 @@
 from fastapi import FastAPI, Depends
 from sqlmodel import Field, Session, SQLModel, create_engine, select
-from dotenv import load_dotenv
-import os
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 
 from app.models import User, Endpoint
+from app.config import DATABASE_URL
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://karimobegi@localhost:5432/uptime")
 engine = create_engine(DATABASE_URL, echo = True) 
-
 
 def get_session():
     with Session(engine) as session:
