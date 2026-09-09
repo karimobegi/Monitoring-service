@@ -42,3 +42,6 @@ celerybeat.pid
 postgres-data/
 
 .env
+
+#private notes on the project
+NOTES.md

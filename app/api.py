@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
 from app.db import get_session, add_endpoint, get_owned_endpoint, get_all_owned_endpoints, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
-from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate, AlertConfig
+from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
 from app.realtime import redis_subscriber, router as realtime_router
 
 @asynccontextmanager
@@ -167,7 +167,7 @@ def delete_alert(endpoint_id: int, alert_id: int, user: User = Depends(get_curre
     if alert is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     delete_alert_in_db(alert, session)
-    
+
 
 
     

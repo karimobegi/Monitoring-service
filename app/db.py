@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 from collections.abc import Sequence
 
-from app.models import User, Endpoint, AlertChannel, AlertConfig, AlertState, AlertConfigRead
+from app.models import User, Endpoint, AlertChannel, AlertConfig, AlertState
 from app.config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL, echo = True) 
