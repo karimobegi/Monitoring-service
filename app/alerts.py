@@ -9,6 +9,7 @@ from app.celery_app import celery_app
 from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
 
 @celery_app.task(
+    acks_late=True,
     autoretry_for=(smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, OSError),
     retry_backoff=True,
     retry_jitter=True,
@@ -51,6 +52,7 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
         s.send_message(msg)
 
 @celery_app.task(
+    acks_late=True,
     autoretry_for=(httpx.HTTPStatusError, httpx.RequestError),
     retry_backoff=True,
     retry_jitter=True,
