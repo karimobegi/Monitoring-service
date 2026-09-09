@@ -43,7 +43,6 @@ class EndpointCreate(EndpointBase):
     pass
 
 class Endpoint(EndpointBase, table=True):
-
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(
     sa_column=Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -69,18 +68,32 @@ class CheckResult(SQLModel, table = True):
     error: str | None #timeout, dns_failure, connection_refused, or NULL if success
     response_time_ms: int | None #NULL if failure
 
-class AlertConfig(SQLModel, table=True):
+class AlertConfigCreate(SQLModel):
+    threshold: int = Field(default = 3)
+    channel: AlertChannel
+    target: str
+    is_active: bool = Field(default = True)
+
+class AlertConfigRead(AlertConfigCreate):
+    id: int | None
+    endpoint_id: int = Field(
+        sa_column=Column(Integer, ForeignKey("endpoint.id", ondelete="CASCADE"), nullable=False, index=True)
+    )
+
+class AlertConfigUpdate(SQLModel):
+    threshold: int | None = None
+    channel: AlertChannel | None = None
+    target: str | None = None
+    is_active: bool | None = None
+
+class AlertConfig(AlertConfigCreate, table=True):
     id: int | None = Field(default = None, primary_key=True)
     user_id: int = Field(
     sa_column=Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     )
     endpoint_id: int = Field(
-    sa_column=Column(Integer, ForeignKey("endpoint.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(Integer, ForeignKey("endpoint.id", ondelete="CASCADE"), nullable=False, index=True)
     )
-    threshold: int = Field(default = 3)
-    channel: AlertChannel
-    target: str
-    is_active: bool = Field(default = True)
 
 class AlertState(SQLModel, table=True):
     id: int | None = Field(default = None, primary_key=True)
@@ -93,9 +106,3 @@ class AlertState(SQLModel, table=True):
     default=None,
     sa_column=Column(DateTime(timezone=True), nullable=True)
     )   
-
-
-
-
-
-
