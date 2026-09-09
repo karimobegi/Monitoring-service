@@ -7,8 +7,8 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
-from app.db import get_session, add_endpoint, get_owned_endpoint, get_all_owned_endpoints, update_endpoint_in_db, delete_endpoint_in_db
-from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate
+from app.db import get_session, add_endpoint, get_owned_endpoint, get_all_owned_endpoints, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
+from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate, AlertConfig
 from app.realtime import redis_subscriber, router as realtime_router
 
 @asynccontextmanager
@@ -106,4 +106,71 @@ def delete_endpoint(endpoint_id: int, user: User = Depends(get_current_user), se
     deleted = delete_endpoint_in_db(endpoint_id, user_id, session)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+@app.post("/endpoint/{endpoint_id}/alerts", response_model=AlertConfigRead)
+def add_alert(endpoint_id: int, alert_create: AlertConfigCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    threshold = alert_create.threshold
+    channel = alert_create.channel
+    target = alert_create.target
+    is_active = alert_create.is_active
+    user_id = user.id
+    assert user_id is not None
+    if get_owned_endpoint(endpoint_id, user_id, session) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    try:
+        alert_config = add_alert_to_db(threshold, channel, target, is_active, endpoint_id, user_id, session)
+        return alert_config
+
+    except (ValueError, IntegrityError):
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect details",
+        )
+    
+@app.get("/endpoint/{endpoint_id}/alerts", response_model=list[AlertConfigRead])
+def get_alerts(endpoint_id: int,  user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    user_id = user.id
+    assert user_id is not None
+    if get_owned_endpoint(endpoint_id, user_id, session) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return get_alerts_per_owned_endpoint(endpoint_id, user_id, session)
+
+@app.patch("/endpoint/{endpoint_id}/alerts/{alert_id}", response_model = AlertConfigRead)
+def update_alert(endpoint_id: int, alert_id: int, alert_update: AlertConfigUpdate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    user_id = user.id
+    assert user_id is not None
+    if get_owned_endpoint(endpoint_id, user_id, session) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    
+    alert = get_owned_alert(alert_id, endpoint_id, user_id, session)
+    if alert is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    update_data = alert_update.model_dump(exclude_unset=True)
+    try:
+        update_alert_in_db(alert, update_data, session)
+    except (ValueError, IntegrityError):
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect details",
+        ) 
+    return alert
+
+@app.delete("/endpoint/{endpoint_id}/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_alert(endpoint_id: int, alert_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    user_id = user.id
+    assert user_id is not None
+    if get_owned_endpoint(endpoint_id, user_id, session) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    
+    alert = get_owned_alert(alert_id, endpoint_id, user_id, session)
+    if alert is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    delete_alert_in_db(alert, session)
+    
+
+
+    
+
+
     
