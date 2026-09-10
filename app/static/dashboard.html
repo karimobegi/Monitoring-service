@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uptime monitor</title>
+<style>
+  :root {
+    --bg: #14171a;
+    --panel: #1b1f24;
+    --line: #2a3038;
+    --text: #dfe4ea;
+    --dim: #7d8894;
+    --up: #4ec9a0;
+    --down: #e5666b;
+    --unknown: #8a93a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: var(--dim); margin: 0 0 24px; }
+
+  .bar {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    padding: 12px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; margin-bottom: 12px;
+  }
+  input, button {
+    font: inherit; color: inherit;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 7px 10px;
+  }
+  input { flex: 1; min-width: 220px; }
+  input::placeholder { color: var(--dim); }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--dim); }
+  :focus-visible { outline: 2px solid var(--up); outline-offset: 1px; }
+
+  .conn { margin-left: auto; color: var(--dim); display: flex; align-items: center; gap: 7px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
+  .conn[data-state="live"] .dot { background: var(--up); }
+  .conn[data-state="retrying"] .dot { background: var(--down); }
+
+  #message { color: var(--down); min-height: 21px; margin: 0 0 12px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-weight: 500; color: var(--dim);
+    padding: 6px 10px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+  tr[data-fresh="1"] td { background: #21323a; transition: background 0s; }
+  tr td { transition: background 1.2s ease-out; }
+  @media (prefers-reduced-motion: reduce) { tr td { transition: none; } }
+
+  .url { word-break: break-all; }
+  .state { font-weight: 600; }
+  .state.up { color: var(--up); }
+  .state.down { color: var(--down); }
+  .state.unknown { color: var(--unknown); }
+  .code, .age { color: var(--dim); }
+  .age[data-stale="1"] { color: var(--down); }
+  .empty { color: var(--dim); padding: 24px 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Uptime monitor</h1>
+  <p class="sub">Snapshot over HTTP, changes over WebSocket.</p>
+
+  <div class="bar">
+    <input id="token" type="password" placeholder="Paste your access token" autocomplete="off">
+    <button id="connect">Connect</button>
+    <button id="disconnect" hidden>Disconnect</button>
+    <span class="conn" id="conn" data-state="idle"><span class="dot"></span><span id="connText">Not connected</span></span>
+  </div>
+
+  <p id="message"></p>
+
+  <table>
+    <thead>
+      <tr><th>Endpoint</th><th>State</th><th>Code</th><th>Last checked</th></tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+
+<script>
+const API_BASE = "http://localhost:8000";
+const WS_BASE  = "ws://localhost:8000/ws";
+
+const STALE_AFTER_MS = 5 * 60 * 1000;   // colour "last checked" red past this
+const MAX_BACKOFF_MS = 30_000;
+
+// endpoint_id -> { endpoint, status_code, checked_at (Date|null), tr }
+const rows = new Map();
+
+let token = null;
+let socket = null;
+let attempt = 0;          // consecutive failed connects, drives backoff
+let retryTimer = null;
+let stopped = true;       // user asked to stop; suppresses all reconnects
+let hadConnection = false; // true once a socket has opened, so we know to resync
+
+const $ = (id) => document.getElementById(id);
+
+
+$("connect").addEventListener("click", start);
+$("disconnect").addEventListener("click", stop);
+$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
+
+async function start() {
+  const value = $("token").value.trim();
+  if (!value) return setMessage("Paste an access token to connect.");
+
+  token = value;
+  stopped = false;
+  attempt = 0;
+  hadConnection = false;
+  setMessage("");
+  $("connect").hidden = true;
+  $("disconnect").hidden = false;
+
+  const ok = await loadSnapshot();
+  if (ok) openSocket();
+}
+
+function stop() {
+  stopped = true;
+  clearTimeout(retryTimer);
+  if (socket) { socket.onclose = null; socket.close(1000, "client stop"); socket = null; }
+  setConnection("idle", "Not connected");
+  $("connect").hidden = false;
+  $("disconnect").hidden = true;
+}
+
+/* ---------- 1. snapshot over HTTP ---------- */
+
+async function loadSnapshot() {
+  try {
+    const res = await fetch(`${API_BASE}/endpoints`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401 || res.status === 403) {
+      stop();
+      setMessage("Token rejected. Log in again and paste a fresh one.");
+      return false;
+    }
+    if (!res.ok) {
+      setMessage(`Could not load endpoints (HTTP ${res.status}).`);
+      return false;
+    }
+    render(await res.json());
+    setMessage("");
+    return true;
+  } catch (err) {
+    setMessage("Could not reach the API. Is the server running?");
+    return false;
+  }
+}
+
+/* ---------- 2. deltas over WebSocket ---------- */
+
+function openSocket() {
+  if (stopped) return;
+  setConnection(hadConnection ? "retrying" : "connecting",
+                hadConnection ? "Reconnecting…" : "Connecting…");
+
+  socket = new WebSocket(`${WS_BASE}?token=${encodeURIComponent(token)}`);
+
+  socket.onopen = () => {
+    const wasDown = hadConnection;
+    attempt = 0;
+    hadConnection = true;
+    setConnection("live", "Live");
+    // Anything published while we were away is gone: pub/sub does not replay.
+    if (wasDown) loadSnapshot();
+  };
+
+  socket.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); }
+    catch { return; }                       // one bad frame must not kill the client
+    if (msg && msg.endpoint_id != null) applyUpdate(msg);
+  };
+
+  socket.onclose = (event) => {
+    socket = null;
+    if (stopped) return;
+    // 1000 = we closed it. 1008 = server rejected the token; retrying loops forever.
+    if (event.code === 1000 || event.code === 1008) {
+      stop();
+      if (event.code === 1008) setMessage("Token rejected on the socket. Paste a fresh one.");
+      return;
+    }
+    scheduleReconnect();
+  };
+
+  socket.onerror = () => { /* onclose always follows; handle it there */ };
+}
+
+function scheduleReconnect() {
+  const base = Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt);
+  const delay = Math.round(base * (0.75 + Math.random() * 0.5)); // jitter
+  attempt++;
+  setConnection("retrying", `Reconnecting in ${Math.round(delay / 1000)}s`);
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(openSocket, delay);
+}
+
+// A laptop waking from sleep has a socket the OS already killed. Retry now, not in 30s.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !stopped && !socket) {
+    clearTimeout(retryTimer);
+    attempt = 0;
+    openSocket();
+  }
+});
+
+
+function render(endpoints) {
+  const tbody = $("rows");
+  tbody.innerHTML = "";
+  rows.clear();
+
+  if (!endpoints.length) {
+    tbody.innerHTML = `<tr><td class="empty" colspan="4">No endpoints yet. Add one through the API to see it here.</td></tr>`;
+    return;
+  }
+
+  for (const ep of endpoints) {
+    const latest = ep.latest_result || ep.last_result || ep;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="url"></td><td class="state"></td><td class="code"></td><td class="age"></td>`;
+    tbody.appendChild(tr);
+
+    const row = {
+      endpoint: ep,
+      status_code: ep.latest_status_code ?? null,
+      checked_at: ep.latest_checked_at ? new Date(ep.latest_checked_at) : null,
+      tr,
+    };
+    rows.set(ep.id, row);
+    paint(row);
+  }
+}
+
+function applyUpdate(msg) {
+  const row = rows.get(msg.endpoint_id);
+  if (!row) return loadSnapshot();   // endpoint we've never seen: resync rather than guess
+
+  row.status_code = msg.status_code ?? null;
+  row.checked_at = msg.checked_at ? new Date(msg.checked_at) : new Date();
+  paint(row);
+
+  row.tr.dataset.fresh = "1";
+  setTimeout(() => { delete row.tr.dataset.fresh; }, 50);
+}
+
+function paint(row) {
+  const [urlCell, stateCell, codeCell, ageCell] = row.tr.children;
+  const ep = row.endpoint;
+
+  urlCell.textContent = ep.name || ep.url || `endpoint ${ep.id}`;
+  urlCell.title = ep.url || "";
+
+  const state = healthOf(row.status_code);
+  stateCell.textContent = state === "up" ? "Up" : state === "down" ? "Down" : "Unknown";
+  stateCell.className = `state ${state}`;
+
+  codeCell.textContent = row.status_code ?? "—";
+  paintAge(row);
+}
+
+// A 503 is a response, not an error. Health is the status code, nothing else.
+function healthOf(code) {
+  if (code == null) return "unknown";
+  return code >= 200 && code < 400 ? "up" : "down";
+}
+
+function paintAge(row) {
+  const cell = row.tr.children[3];
+  if (!row.checked_at) { cell.textContent = "never"; cell.dataset.stale = "0"; return; }
+  const ms = Date.now() - row.checked_at.getTime();
+  cell.textContent = humanAge(ms);
+  cell.dataset.stale = ms > STALE_AFTER_MS ? "1" : "0";
+  cell.title = row.checked_at.toLocaleString();
+}
+
+function humanAge(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
+// The server is silent while everything is healthy, so the clock has to move locally.
+setInterval(() => { for (const row of rows.values()) paintAge(row); }, 1000);
+
+
+function setConnection(state, text) {
+  $("conn").dataset.state = state;
+  $("connText").textContent = text;
+}
+
+function setMessage(text) { $("message").textContent = text; }
+</script>
+</body>
+</html>

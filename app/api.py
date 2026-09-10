@@ -107,7 +107,7 @@ def delete_endpoint(endpoint_id: int, user: User = Depends(get_current_user), se
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-@app.post("/endpoint/{endpoint_id}/alerts", response_model=AlertConfigRead)
+@app.post("/endpoints/{endpoint_id}/alerts", response_model=AlertConfigRead)
 def add_alert(endpoint_id: int, alert_create: AlertConfigCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     threshold = alert_create.threshold
     channel = alert_create.channel
@@ -127,7 +127,7 @@ def add_alert(endpoint_id: int, alert_create: AlertConfigCreate, user: User = De
             detail="Incorrect details",
         )
     
-@app.get("/endpoint/{endpoint_id}/alerts", response_model=list[AlertConfigRead])
+@app.get("/endpoints/{endpoint_id}/alerts", response_model=list[AlertConfigRead])
 def get_alerts(endpoint_id: int,  user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     user_id = user.id
     assert user_id is not None
@@ -135,7 +135,7 @@ def get_alerts(endpoint_id: int,  user: User = Depends(get_current_user), sessio
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return get_alerts_per_owned_endpoint(endpoint_id, user_id, session)
 
-@app.patch("/endpoint/{endpoint_id}/alerts/{alert_id}", response_model = AlertConfigRead)
+@app.patch("/endpoints/{endpoint_id}/alerts/{alert_id}", response_model = AlertConfigRead)
 def update_alert(endpoint_id: int, alert_id: int, alert_update: AlertConfigUpdate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     user_id = user.id
     assert user_id is not None
@@ -156,7 +156,7 @@ def update_alert(endpoint_id: int, alert_id: int, alert_update: AlertConfigUpdat
         ) 
     return alert
 
-@app.delete("/endpoint/{endpoint_id}/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/endpoints/{endpoint_id}/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_alert(endpoint_id: int, alert_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     user_id = user.id
     assert user_id is not None

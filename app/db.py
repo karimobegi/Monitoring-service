@@ -1,9 +1,10 @@
 from sqlmodel import Session, create_engine, select
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 from collections.abc import Sequence
 
-from app.models import User, Endpoint, AlertChannel, AlertConfig, AlertState
+from app.models import User, Endpoint, EndpointRead, AlertChannel, AlertConfig, AlertState
 from app.config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL, echo = True) 
@@ -39,6 +40,21 @@ def get_owned_endpoint(endpoint_id: int, user_id: int, session: Session):
 def get_all_owned_endpoints(user_id: int, session: Session, limit: int = 30, offset: int = 0):
      rows = session.exec((select(Endpoint).where(Endpoint.user_id == user_id)).order_by(Endpoint.id).limit(limit).offset(offset)).all() #type: ignore
      return rows
+def get_endpoints_with_status(user_id: int, session: Session, limit: int = 30, offset: int = 0): 
+    rows = session.execute(text("""SELECT e.id, e.url, e.interval_seconds, e.is_active, e.next_check_at, 
+                                        latest.status_code AS latest_status_code, 
+                                        latest.checked_at AS latest_checked_at 
+                                    FROM endpoint e 
+                                    LEFT JOIN (
+                                        SELECT DISTINCT ON (endpoint_id) endpoint_id, status_code, checked_at 
+                                        FROM checkresult 
+                                        ORDER BY endpoint_id, checked_at DESC 
+                                    ) latest ON latest.endpoint_id = e.id 
+                                    WHERE e.user_id = :user_id 
+                                    ORDER BY e.id 
+                                    LIMIT :limit OFFSET :offset """), 
+                                    {"user_id": user_id, "limit": limit, "offset": offset},).all() 
+    return [EndpointRead(**row._mapping) for row in rows]
 
 def update_endpoint_in_db(endpoint_id: int, user_id: int, session: Session, update_data: dict):
     endpoint = get_owned_endpoint(endpoint_id, user_id, session)

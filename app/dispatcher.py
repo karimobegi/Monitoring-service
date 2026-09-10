@@ -38,6 +38,7 @@ def dispatch_due_checks():
 
     for row in rows:
         perform_check.apply_async(args=[row.id, row.url, probe_time.isoformat()]) #type: ignore
+        logging.warning("claimed %d endpoints: %s", len(rows), [r.id for r in rows])
 
 @celery_app.task(
     autoretry_for=(OperationalError,),
@@ -45,7 +46,6 @@ def dispatch_due_checks():
     retry_jitter=True,
     max_retries=3,
 )
-
 def perform_check(endpoint_id: int, url: str, checked_at: str):
     error = None
     try:
@@ -65,7 +65,7 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         status_code=None
         response_time_ms=None
     with Session(engine) as session:
-        prev_result = session.exec(select(CheckResult).where(CheckResult.endpoint_id == endpoint_id).order_by(desc(CheckResult.checked_at))).first()
+        prev_result = session.exec(select(CheckResult).where(CheckResult.endpoint_id == endpoint_id).order_by(desc(CheckResult.checked_at)).limit(1)).first()
         prev_status = prev_result.status_code if prev_result is not None else None
         check_result = CheckResult(endpoint_id = endpoint_id, checked_at =datetime.fromisoformat(checked_at), status_code=status_code, error=error, response_time_ms=response_time_ms)
         session.add(check_result)

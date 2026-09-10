@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index, desc
 from enum import Enum
 
 class AlertChannel(str, Enum):
@@ -38,6 +38,9 @@ class EndpointRead(EndpointBase):
     id: int 
     is_active: bool
     next_check_at: datetime
+    latest_status_code: int | None = None
+    latest_checked_at: datetime | None = None
+
 
 class EndpointCreate(EndpointBase):
     pass
@@ -56,17 +59,21 @@ class Endpoint(EndpointBase, table=True):
     )
 
 
-class CheckResult(SQLModel, table = True):
+class CheckResult(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     endpoint_id: int = Field(
-    sa_column=Column(Integer, ForeignKey("endpoint.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(Integer, ForeignKey("endpoint.id", ondelete="CASCADE"), nullable=False)
     )
     checked_at: datetime = Field(
-    sa_column=Column(DateTime(timezone=True), nullable=False)
+        sa_column=Column(DateTime(timezone=True), nullable=False)
     )
-    status_code: int | None #200, 503, or NULL when no HTTP response
-    error: str | None #timeout, dns_failure, connection_refused, or NULL if success
-    response_time_ms: int | None #NULL if failure
+    status_code: int | None      # 200, 503, or NULL when no HTTP response
+    error: str | None            # timeout, dns_failure, connection_refused, or NULL if success
+    response_time_ms: int | None # NULL if failure
+
+    __table_args__ = (
+        Index("ix_checkresult_latest", "endpoint_id", desc("checked_at")),
+    )
 
 class AlertConfigCreate(SQLModel):
     threshold: int = Field(default = 3)
