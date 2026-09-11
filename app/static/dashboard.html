@@ -272,7 +272,7 @@ function paint(row) {
   urlCell.textContent = ep.name || ep.url || `endpoint ${ep.id}`;
   urlCell.title = ep.url || "";
 
-  const state = healthOf(row.status_code);
+  const state = healthOf(row.status_code, row.checked_at);
   stateCell.textContent = state === "up" ? "Up" : state === "down" ? "Down" : "Unknown";
   stateCell.className = `state ${state}`;
 
@@ -281,8 +281,9 @@ function paint(row) {
 }
 
 // A 503 is a response, not an error. Health is the status code, nothing else.
-function healthOf(code) {
-  if (code == null) return "unknown";
+function healthOf(code, checkedAt) {
+  if (!checkedAt) return "unknown";       // never checked
+  if (code == null) return "down";        // checked, but no response
   return code >= 200 && code < 400 ? "up" : "down";
 }
 
