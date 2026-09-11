@@ -71,7 +71,7 @@ services:
       # Must be in the environment before prometheus_client is imported.
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
     tmpfs:
-      - /tmp/prometheus       # recreated empty on every container start: no stale counts
+      - /tmp/prometheus:mode=1777       # recreated empty on every container start: no stale counts
     ports:
       - "9808:9808"           # worker metrics, for curl from your Mac
     depends_on: *after_migrate
