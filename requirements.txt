@@ -26,4 +26,4 @@ httpx
 # Observability
 structlog
 prometheus-client
-"pwdlib[argon2]"
+pwdlib[argon2]
