@@ -4,6 +4,7 @@ from sqlalchemy import text
 import httpx
 from sqlalchemy.exc import OperationalError
 import structlog
+import socket
 
 from app.db import engine
 from app.events import publish_status_change
@@ -49,6 +50,17 @@ def dispatch_due_checks():
     if rows:
         log.info("endpoints_claimed", count=len(rows), endpoint_ids=[r.id for r in rows])
 
+def classify_connect_error(exc: httpx.ConnectError) -> str:
+    """Tell DNS failures from refused connections by walking the exception chain."""
+    cause: BaseException | None = exc
+    while cause is not None:
+        if isinstance(cause, socket.gaierror):
+            return "dns_failure"
+        if isinstance(cause, ConnectionRefusedError):
+            return "connection_refused"
+        cause = cause.__cause__ or cause.__context__
+    return "connect_error"
+
 @celery_app.task(
     autoretry_for=(OperationalError,),
     retry_backoff=True,
@@ -66,10 +78,10 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         error = "timeout"
         status_code=None
         response_time_ms=None
-    except httpx.ConnectError:
-        error = "dns_failure"
-        status_code=None
-        response_time_ms=None
+    except httpx.ConnectError as exc:
+        error = classify_connect_error(exc)
+        status_code = None
+        response_time_ms = None
     except httpx.HTTPError:
         error="unknown"
         status_code=None
