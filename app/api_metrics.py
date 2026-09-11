@@ -15,3 +15,8 @@ WEBSOCKET_CONNECTIONS = Gauge(
     "monitor_websocket_connections",
     "Open dashboard WebSocket connections",
 )
+RATE_LIMITED = Counter(
+    "monitor_rate_limited_total",
+    "Requests rejected by a rate limit",
+    ["limit"],
+)

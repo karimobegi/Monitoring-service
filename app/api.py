@@ -5,7 +5,7 @@ import structlog
 import time
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from sqlalchemy.exc import IntegrityError
 import asyncio
 from contextlib import asynccontextmanager
@@ -17,6 +17,8 @@ from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate,
 from app.realtime import redis_subscriber, router as realtime_router
 from app.logging_config import configure_logging
 from app.api_metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
+from app.config import MAX_ENDPOINTS_PER_USER
+from app.rate_limit import client_ip, enforce
 
 configure_logging()
 
@@ -60,7 +62,8 @@ def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/register", response_model=UserRead)
-def register(user_create: UserCreate, session: Session = Depends(get_session)):
+def register(request: Request, user_create: UserCreate, session: Session = Depends(get_session)):
+    enforce("register_ip", client_ip(request), limit=5, window_seconds=3600)
     email = user_create.email.strip().lower()
     existing = session.exec(select(User).where(User.email == email)).first()
     if existing:
@@ -80,8 +83,10 @@ def register(user_create: UserCreate, session: Session = Depends(get_session)):
     return user
 
 @app.post("/token", response_model=Token)
-def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: Session = Depends(get_session)):
+def login(request: Request, form_data: Annotated[OAuth2PasswordRequestForm, Depends()], session: Session = Depends(get_session)):
     email = form_data.username.strip().lower()
+    enforce("login_ip", client_ip(request), limit=20, window_seconds=60)
+    enforce("login_email", email, limit=5, window_seconds=60)
     password = form_data.password
 
     user = authenticate_user(email, password, session)

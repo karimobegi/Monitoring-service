@@ -2,6 +2,20 @@ from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index, desc
 from enum import Enum
+from urllib.parse import urlsplit
+from pydantic import field_validator
+
+def validate_check_url(value: str) -> str:
+    value = value.strip()
+    parts = urlsplit(value)
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or any(ch.isspace() for ch in value)
+        or len(value) > 2048
+    ):
+        raise ValueError("must be an http:// or https:// URL with a host")
+    return value
 
 class AlertChannel(str, Enum):
     EMAIL = "email"
@@ -30,10 +44,15 @@ class EndpointBase(SQLModel):
     interval_seconds: int = 60
 
 class EndpointUpdate(SQLModel):
-    interval_seconds: int | None = None
+    interval_seconds: int | None = Field(default=None, ge=10, le=86400)
     is_active: bool | None = None
     url: str | None = None
-
+    
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, value: str | None) -> str | None:
+        return None if value is None else validate_check_url(value)
+    
 class EndpointRead(EndpointBase):
     id: int 
     is_active: bool
@@ -43,7 +62,11 @@ class EndpointRead(EndpointBase):
 
 
 class EndpointCreate(EndpointBase):
-    pass
+    interval_seconds: int = Field(default=60, ge=10, le=86400)
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, value: str) -> str:
+        return validate_check_url(value)
 
 class Endpoint(EndpointBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
