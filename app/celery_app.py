@@ -1,11 +1,25 @@
 import structlog
 from celery import Celery, Task
-from celery.signals import setup_logging, task_postrun, task_prerun, worker_process_init
+from celery.signals import setup_logging, task_postrun, task_prerun, worker_process_init, worker_ready
+import os
 
 from app.config import REDIS_URL
 from app.db import engine
 from app.logging_config import configure_logging
 
+WORKER_METRICS_PORT = 9808
+
+@worker_ready.connect
+def start_metrics_server(**kwargs):
+    # Runs once, in the worker's parent process; the prefork children only write metric files
+    if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
+        return
+    from prometheus_client import CollectorRegistry, multiprocess, start_http_server
+
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry)
+    start_http_server(WORKER_METRICS_PORT, registry=registry)
+    structlog.get_logger(__name__).info("metrics_server_started", port=WORKER_METRICS_PORT)
 
 @setup_logging.connect
 def init_logging(**kwargs):

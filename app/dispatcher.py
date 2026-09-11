@@ -5,12 +5,14 @@ import httpx
 from sqlalchemy.exc import OperationalError
 import structlog
 import socket
+import time
 
 from app.db import engine
 from app.events import publish_status_change
 from app.models import CheckResult, AlertConfig, AlertState, AlertChannel
 from app.celery_app import celery_app
 from app.alerts import send_email_alert, send_webhook_alert
+from app.worker_metrics import ALERTS_QUEUED, CHECKS, CHECK_DURATION, CHECK_LAG
 
 log = structlog.get_logger(__name__)
 
@@ -24,12 +26,9 @@ def queue_alert(config: AlertConfig, endpoint_id: int, url: str,
     else:
         log.warning("unknown_alert_channel", channel=str(config.channel), alert_config_id=config.id)
         return
-    log.info(
-        "alert_queued",
-        alert_config_id=config.id,
-        channel=config.channel.value,
-        kind="recovery" if is_recovery else "down",
-    )
+    kind = "recovery" if is_recovery else "down"
+    ALERTS_QUEUED.labels(channel=config.channel.value, kind=kind).inc()
+    log.info("alert_queued", alert_config_id=config.id, channel=config.channel.value, kind=kind)
 
 @celery_app.task
 def dispatch_due_checks():
@@ -69,6 +68,9 @@ def classify_connect_error(exc: httpx.ConnectError) -> str:
 )
 def perform_check(endpoint_id: int, url: str, checked_at: str):
     structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id)
+    lag = datetime.now(timezone.utc) - datetime.fromisoformat(checked_at)
+    CHECK_LAG.observe(max(lag.total_seconds(), 0.0))
+    started = time.perf_counter()
     error = None
     try:
         response = httpx.get(url, timeout=10.0)
@@ -87,7 +89,9 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         status_code=None
         response_time_ms=None
 
+    CHECK_DURATION.observe(time.perf_counter() - started)
     is_up = status_code is not None and 200 <= status_code < 400
+    CHECKS.labels(outcome="up" if is_up else (error or "http_error")).inc()
     log.info(
         "check_completed",
         url=url,

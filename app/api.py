@@ -1,19 +1,22 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response
 from typing import Annotated
 import uuid
 import structlog
+import time
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 from sqlalchemy.exc import IntegrityError
 import asyncio
 from contextlib import asynccontextmanager
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
 from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
 from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
 from app.realtime import redis_subscriber, router as realtime_router
 from app.logging_config import configure_logging
+from app.api_metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
 
 configure_logging()
 
@@ -35,6 +38,26 @@ async def bind_request_context(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     return response
+
+@app.middleware("http")
+async def record_request_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    status = "500"  # stays 500 if the handler raises
+    try:
+        response = await call_next(request)
+        status = str(response.status_code)
+        return response
+    finally:
+        # Label by route template (/endpoints/{endpoint_id}), never the raw path,
+        # or every id becomes a new time series. Unmatched paths and static files -> "other".
+        route = getattr(request.scope.get("route"), "path", "other")
+        HTTP_REQUESTS.labels(method=request.method, route=route, status=status).inc()
+        HTTP_REQUEST_DURATION.labels(method=request.method, route=route).observe(time.perf_counter() - started)
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/register", response_model=UserRead)
 def register(user_create: UserCreate, session: Session = Depends(get_session)):

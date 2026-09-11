@@ -1,15 +1,17 @@
-# Shared settings for the four services built from this repo's Dockerfile
+# Environment shared by every service built from this repo's Dockerfile.
+# These override .env. Inside a container, localhost means that container,
+# so we point at the other services by name instead.
+x-app-env: &app-env
+  DATABASE_URL: postgresql://monitor:monitor@db:5432/monitor
+  REDIS_URL: redis://redis:6379/0
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+
 x-app: &app
   build: .
   image: monitoring-service:local
   env_file: .env              # SECRET_KEY, ALGORITHM, etc.
-  environment:
-    # These override .env. Inside a container, localhost means that container,
-    # so we point at the other services by name instead.
-    DATABASE_URL: postgresql://monitor:monitor@db:5432/monitor
-    REDIS_URL: redis://redis:6379/0
-    SMTP_HOST: mailpit
-    SMTP_PORT: "1025"
+  environment: *app-env
 
 services:
   db:
@@ -37,7 +39,7 @@ services:
       retries: 20
 
   mailpit:
-    image: axllent/mailpit    # replaces aiosmtpd: catches alert emails
+    image: axllent/mailpit    # catches alert emails
     ports:
       - "8025:8025"           # web UI at http://localhost:8025
 
@@ -63,6 +65,15 @@ services:
   worker:
     <<: *app
     command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=info"]
+    environment:
+      <<: *app-env
+      # Worker only: prefork children write metric files here, the parent serves the sum.
+      # Must be in the environment before prometheus_client is imported.
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    tmpfs:
+      - /tmp/prometheus       # recreated empty on every container start: no stale counts
+    ports:
+      - "9808:9808"           # worker metrics, for curl from your Mac
     depends_on: *after_migrate
     restart: unless-stopped
 
@@ -73,6 +84,16 @@ services:
     command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=info", "-s", "/tmp/celerybeat-schedule"]
     depends_on: *after_migrate
     restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"           # UI at http://localhost:9090
+    depends_on:
+      - api
+      - worker
 
 volumes:
   pgdata:

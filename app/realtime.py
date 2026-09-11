@@ -12,6 +12,7 @@ from app.models import User
 from app.db import get_all_owned_endpoints, engine
 from app.auth import user_from_token
 from app.config import REDIS_URL, STATUS_CHANNEL
+from app.api_metrics import WEBSOCKET_CONNECTIONS
 
 log = structlog.get_logger(__name__)
 
@@ -30,18 +31,22 @@ async def ws_user(websocket: WebSocket, token: str | None = Query(default = None
 @router.websocket("/ws")
 async def dashboard(websocket: WebSocket, user: User = Depends(ws_user)):
     await websocket.accept()
-    with Session(engine) as session:
-        user_id = user.id
-        rows = get_all_owned_endpoints(user_id, session) #type: ignore
-        ids = [e.id for e in rows if e.id is not None]
-    for eid in ids:
-        connections[eid].add(websocket)
+    WEBSOCKET_CONNECTIONS.inc()
+    ids: list[int] = []
     try:
+        with Session(engine) as session:
+            rows = get_all_owned_endpoints(user.id, session)  # type: ignore
+            ids = [e.id for e in rows if e.id is not None]
+        for eid in ids:
+            connections[eid].add(websocket)
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         for eid in ids:
             connections[eid].discard(websocket)
+        WEBSOCKET_CONNECTIONS.dec()
 
 async def redis_subscriber() -> None:
     client = redis.from_url(REDIS_URL)

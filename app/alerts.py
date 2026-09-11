@@ -4,9 +4,11 @@ from email.message import EmailMessage
 from fastapi import HTTPException
 import httpx
 import structlog
+from celery.signals import task_failure, task_retry
 
 from app.celery_app import celery_app
 from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
+from app.worker_metrics import ALERT_DELIVERY_FAILURES, ALERTS_SENT
 
 log = structlog.get_logger(__name__)
 
@@ -18,7 +20,8 @@ log = structlog.get_logger(__name__)
     max_retries=5,
 )
 def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
-    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind="recovery" if is_recovery else "down")
+    kind = "recovery" if is_recovery else "down"
+    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind=kind)
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
     msg["To"] = target
@@ -54,6 +57,7 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
             s.login(SMTP_USER, SMTP_PASSWORD)
         s.send_message(msg)
     log.info("alert_sent", channel="email")
+    ALERTS_SENT.labels(channel="email", kind=kind).inc()
 
 @celery_app.task(
     acks_late=True,
@@ -63,7 +67,8 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
     max_retries=5,    
 )
 def send_webhook_alert(target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
-    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind="recovery" if is_recovery else "down")
+    kind = "recovery" if is_recovery else "down"
+    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind=kind)
     event = "endpoint_recovered" if is_recovery else "endpoint_down"
     payload_dict = {
         "event": event,
@@ -75,11 +80,25 @@ def send_webhook_alert(target: str, endpoint_id: int, url: str, timestamp: str, 
         response = httpx.post(target, json=payload_dict, timeout=10.0)
         response.raise_for_status()
         log.info("alert_sent", channel="webhook", target_host=httpx.URL(target).host, status_code=response.status_code)
+        ALERTS_SENT.labels(channel="webhook", kind=kind).inc()
     except httpx.HTTPStatusError as e:
         if e.response.status_code >= 500 or e.response.status_code == 429:
             raise 
         log.error("webhook_rejected", status_code=e.response.status_code, target_host=httpx.URL(target).host)
+        ALERT_DELIVERY_FAILURES.labels(channel="webhook", reason="rejected").inc()
         return  
 
+CHANNEL_BY_TASK = {send_email_alert.name: "email", send_webhook_alert.name: "webhook"}  # type: ignore
+
+@task_retry.connect
+def count_alert_retry(sender=None, **kwargs):
+    channel = CHANNEL_BY_TASK.get(getattr(sender, "name", ""))
+    if channel:
+        ALERT_DELIVERY_FAILURES.labels(channel=channel, reason="retry").inc()
 
 
+@task_failure.connect
+def count_alert_exhausted(sender=None, **kwargs):
+    channel = CHANNEL_BY_TASK.get(getattr(sender, "name", ""))
+    if channel:
+        ALERT_DELIVERY_FAILURES.labels(channel=channel, reason="exhausted").inc()
