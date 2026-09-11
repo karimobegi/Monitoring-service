@@ -1,13 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from typing import Annotated
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 from sqlalchemy.exc import IntegrityError
 import asyncio
 from contextlib import asynccontextmanager
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
-from app.db import get_session, add_endpoint, get_owned_endpoint, get_all_owned_endpoints, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
+from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
 from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
 from app.realtime import redis_subscriber, router as realtime_router
 
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(realtime_router)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 @app.post("/register", response_model=UserRead)
 def register(user_create: UserCreate, session: Session = Depends(get_session)):
@@ -86,7 +88,7 @@ def get_endpoint(endpoint_id: int, user: User = Depends(get_current_user), sessi
 def get_all_endpoints(limit: int = Query(default=30, le=100, ge=1), offset: int = Query(default = 0, ge=0), user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     user_id = user.id
     assert user_id is not None
-    rows = get_all_owned_endpoints(user_id, session, limit, offset)
+    rows = get_endpoints_with_status(user_id, session, limit, offset)
     return rows
 
 @app.patch("/endpoints/{endpoint_id}", response_model = EndpointRead)
