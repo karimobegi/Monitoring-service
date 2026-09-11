@@ -1,5 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request
 from typing import Annotated
+import uuid
+import structlog
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
@@ -11,6 +13,9 @@ from app.auth import get_password_hash, authenticate_user, create_access_token, 
 from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
 from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
 from app.realtime import redis_subscriber, router as realtime_router
+from app.logging_config import configure_logging
+
+configure_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -21,6 +26,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(realtime_router)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+@app.middleware("http")
+async def bind_request_context(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 @app.post("/register", response_model=UserRead)
 def register(user_create: UserCreate, session: Session = Depends(get_session)):

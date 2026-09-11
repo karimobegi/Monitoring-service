@@ -3,10 +3,12 @@ import smtplib
 from email.message import EmailMessage
 from fastapi import HTTPException
 import httpx
-import logging
+import structlog
 
 from app.celery_app import celery_app
 from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
+
+log = structlog.get_logger(__name__)
 
 @celery_app.task(
     acks_late=True,
@@ -72,7 +74,7 @@ def send_webhook_alert(target: str, endpoint_id: int, url: str, timestamp: str, 
     except httpx.HTTPStatusError as e:
         if e.response.status_code >= 500 or e.response.status_code == 429:
             raise 
-        logging.error("webhook rejected: %s %s", e.response.status_code, target)
+        log.error("webhook_rejected", status_code=e.response.status_code, target_host=httpx.URL(target).host)
         return  
 
 

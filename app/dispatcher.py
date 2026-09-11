@@ -3,7 +3,7 @@ from sqlmodel import Session, select, desc
 from sqlalchemy import text
 import httpx
 from sqlalchemy.exc import OperationalError
-import logging
+import structlog
 
 from app.db import engine
 from app.events import publish_status_change
@@ -11,6 +11,7 @@ from app.models import CheckResult, AlertConfig, AlertState, AlertChannel
 from app.celery_app import celery_app
 from app.alerts import send_email_alert, send_webhook_alert
 
+log = structlog.get_logger(__name__)
 
 def queue_alert(config: AlertConfig, endpoint_id: int, url: str,
                 timestamp: str, is_recovery: bool) -> None:
@@ -20,8 +21,7 @@ def queue_alert(config: AlertConfig, endpoint_id: int, url: str,
     elif config.channel == AlertChannel.WEBHOOK:
         send_webhook_alert.delay(*args) #type: ignore
     else:
-        logging.warning("unknown alert channel %r on config %s", config.channel, config.id)
-
+        log.warning("unknown_alert_channel", channel=config.channel, alert_config_id=config.id)
 @celery_app.task
 def dispatch_due_checks():
     probe_time = datetime.now(timezone.utc)
@@ -38,7 +38,7 @@ def dispatch_due_checks():
 
     for row in rows:
         perform_check.apply_async(args=[row.id, row.url, probe_time.isoformat()]) #type: ignore
-        logging.warning("claimed %d endpoints: %s", len(rows), [r.id for r in rows])
+        log.info("endpoints_claimed", count=len(rows), endpoint_ids=[r.id for r in rows])
 
 @celery_app.task(
     autoretry_for=(OperationalError,),
@@ -74,7 +74,7 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
                 publish_status_change(endpoint_id, status_code, checked_at)
                 
             except Exception:
-                logging.exception("error publishing")
+                log.exception("status_publish_failed", endpoint_id=endpoint_id)
         alert_rows = session.exec(select(AlertConfig).where(AlertConfig.endpoint_id == endpoint_id, AlertConfig.is_active == True)).all()
 
         is_up = status_code is not None and 200 <= status_code < 400

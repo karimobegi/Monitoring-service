@@ -17,3 +17,6 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "monitoring@localhost")
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FORMAT = os.getenv("LOG_FORMAT", "json")

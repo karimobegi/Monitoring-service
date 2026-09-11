@@ -3,8 +3,9 @@ from sqlmodel import Session
 from collections import defaultdict
 import redis.asyncio as redis
 import json
-import logging
 import asyncio
+import structlog
+
 
 
 from app.models import User
@@ -12,6 +13,7 @@ from app.db import get_all_owned_endpoints, engine
 from app.auth import user_from_token
 from app.config import REDIS_URL, STATUS_CHANNEL
 
+log = structlog.get_logger(__name__)
 
 router = APIRouter()
 connections: dict[int, set[WebSocket]] = defaultdict(set)
@@ -58,7 +60,7 @@ async def redis_subscriber() -> None:
                     except Exception:
                         pass
             except Exception:
-                logging.exception("bad pubsub message: %r", message["data"])
+                log.exception("pubsub_message_invalid", data=message["data"])
 
     except asyncio.CancelledError:
         pass
