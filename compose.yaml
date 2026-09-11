@@ -1,0 +1,78 @@
+# Shared settings for the four services built from this repo's Dockerfile
+x-app: &app
+  build: .
+  image: monitoring-service:local
+  env_file: .env              # SECRET_KEY, ALGORITHM, etc.
+  environment:
+    # These override .env. Inside a container, localhost means that container,
+    # so we point at the other services by name instead.
+    DATABASE_URL: postgresql://monitor:monitor@db:5432/monitor
+    REDIS_URL: redis://redis:6379/0
+    SMTP_HOST: mailpit
+    SMTP_PORT: "1025"
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: monitor
+      POSTGRES_DB: monitor
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # data survives `docker compose down`
+    healthcheck:
+      # -h 127.0.0.1: during first-run init Postgres only listens on a socket,
+      # so this waits for the real server rather than the temporary init one
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U monitor -d monitor"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit    # replaces aiosmtpd: catches alert emails
+    ports:
+      - "8025:8025"           # web UI at http://localhost:8025
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy   # plain depends_on only waits for "started"
+
+  api:
+    <<: *app
+    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    depends_on: &after_migrate
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=info"]
+    depends_on: *after_migrate
+    restart: unless-stopped
+
+  beat:
+    <<: *app
+    # Exactly one Beat instance. Never scale this service.
+    # Schedule file goes in /tmp: the container filesystem is disposable anyway.
+    command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=info", "-s", "/tmp/celerybeat-schedule"]
+    depends_on: *after_migrate
+    restart: unless-stopped
+
+volumes:
+  pgdata:
