@@ -21,7 +21,15 @@ def queue_alert(config: AlertConfig, endpoint_id: int, url: str,
     elif config.channel == AlertChannel.WEBHOOK:
         send_webhook_alert.delay(*args) #type: ignore
     else:
-        log.warning("unknown_alert_channel", channel=config.channel, alert_config_id=config.id)
+        log.warning("unknown_alert_channel", channel=str(config.channel), alert_config_id=config.id)
+        return
+    log.info(
+        "alert_queued",
+        alert_config_id=config.id,
+        channel=config.channel.value,
+        kind="recovery" if is_recovery else "down",
+    )
+
 @celery_app.task
 def dispatch_due_checks():
     probe_time = datetime.now(timezone.utc)
@@ -38,6 +46,7 @@ def dispatch_due_checks():
 
     for row in rows:
         perform_check.apply_async(args=[row.id, row.url, probe_time.isoformat()]) #type: ignore
+    if rows:
         log.info("endpoints_claimed", count=len(rows), endpoint_ids=[r.id for r in rows])
 
 @celery_app.task(
@@ -47,6 +56,7 @@ def dispatch_due_checks():
     max_retries=3,
 )
 def perform_check(endpoint_id: int, url: str, checked_at: str):
+    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id)
     error = None
     try:
         response = httpx.get(url, timeout=10.0)
@@ -64,6 +74,17 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         error="unknown"
         status_code=None
         response_time_ms=None
+
+    is_up = status_code is not None and 200 <= status_code < 400
+    log.info(
+        "check_completed",
+        url=url,
+        status_code=status_code,
+        error=error,
+        response_time_ms=response_time_ms,
+        is_up=is_up,
+    )
+
     with Session(engine) as session:
         prev_result = session.exec(select(CheckResult).where(CheckResult.endpoint_id == endpoint_id).order_by(desc(CheckResult.checked_at)).limit(1)).first()
         prev_status = prev_result.status_code if prev_result is not None else None
@@ -76,8 +97,6 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
             except Exception:
                 log.exception("status_publish_failed", endpoint_id=endpoint_id)
         alert_rows = session.exec(select(AlertConfig).where(AlertConfig.endpoint_id == endpoint_id, AlertConfig.is_active == True)).all()
-
-        is_up = status_code is not None and 200 <= status_code < 400
 
         for row in alert_rows:
             if row.id is None: continue

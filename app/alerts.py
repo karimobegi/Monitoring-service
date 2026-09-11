@@ -18,6 +18,7 @@ log = structlog.get_logger(__name__)
     max_retries=5,
 )
 def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
+    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind="recovery" if is_recovery else "down")
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
     msg["To"] = target
@@ -52,6 +53,7 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
             s.starttls()
             s.login(SMTP_USER, SMTP_PASSWORD)
         s.send_message(msg)
+    log.info("alert_sent", channel="email")
 
 @celery_app.task(
     acks_late=True,
@@ -61,6 +63,7 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
     max_retries=5,    
 )
 def send_webhook_alert(target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
+    structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind="recovery" if is_recovery else "down")
     event = "endpoint_recovered" if is_recovery else "endpoint_down"
     payload_dict = {
         "event": event,
@@ -71,6 +74,7 @@ def send_webhook_alert(target: str, endpoint_id: int, url: str, timestamp: str, 
     try:
         response = httpx.post(target, json=payload_dict, timeout=10.0)
         response.raise_for_status()
+        log.info("alert_sent", channel="webhook", target_host=httpx.URL(target).host, status_code=response.status_code)
     except httpx.HTTPStatusError as e:
         if e.response.status_code >= 500 or e.response.status_code == 429:
             raise 
