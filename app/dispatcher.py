@@ -60,6 +60,10 @@ def classify_connect_error(exc: httpx.ConnectError) -> str:
         cause = cause.__cause__ or cause.__context__
     return "connect_error"
 
+def is_up_for(status_code: int | None) -> bool:
+    return status_code is not None and 200 <= status_code < 400
+
+
 @celery_app.task(
     autoretry_for=(OperationalError,),
     retry_backoff=True,
@@ -78,19 +82,19 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         response_time_ms = int(response.elapsed.total_seconds() * 1000)
     except httpx.TimeoutException:
         error = "timeout"
-        status_code=None
-        response_time_ms=None
+        status_code = None
+        response_time_ms = None
     except httpx.ConnectError as exc:
         error = classify_connect_error(exc)
         status_code = None
         response_time_ms = None
     except httpx.HTTPError:
-        error="unknown"
-        status_code=None
-        response_time_ms=None
+        error = "unknown"
+        status_code = None
+        response_time_ms = None
 
     CHECK_DURATION.observe(time.perf_counter() - started)
-    is_up = status_code is not None and 200 <= status_code < 400
+    is_up = is_up_for(status_code)
     CHECKS.labels(outcome="up" if is_up else (error or "http_error")).inc()
     log.info(
         "check_completed",
@@ -102,28 +106,45 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
     )
 
     with Session(engine) as session:
-        prev_result = session.exec(select(CheckResult).where(CheckResult.endpoint_id == endpoint_id).order_by(desc(CheckResult.checked_at)).limit(1)).first()
-        prev_status = prev_result.status_code if prev_result is not None else None
-        check_result = CheckResult(endpoint_id = endpoint_id, checked_at =datetime.fromisoformat(checked_at), status_code=status_code, error=error, response_time_ms=response_time_ms)
+        prev_result = session.exec(
+            select(CheckResult)
+            .where(CheckResult.endpoint_id == endpoint_id)
+            .order_by(desc(CheckResult.checked_at))
+            .limit(1)
+        ).first()
+
+        # None means no prior result: a first check always publishes.
+        prev_is_up = is_up_for(prev_result.status_code) if prev_result is not None else None
+        should_publish = prev_is_up is None or prev_is_up != is_up
+
+        check_result = CheckResult(
+            endpoint_id=endpoint_id,
+            checked_at=datetime.fromisoformat(checked_at),
+            status_code=status_code,
+            error=error,
+            response_time_ms=response_time_ms,
+        )
         session.add(check_result)
-        if prev_result is not None and prev_status != status_code:
-            try:
-                publish_status_change(endpoint_id, status_code, checked_at)
-                
-            except Exception:
-                log.exception("status_publish_failed", endpoint_id=endpoint_id)
-        alert_rows = session.exec(select(AlertConfig).where(AlertConfig.endpoint_id == endpoint_id, AlertConfig.is_active == True)).all()
+
+        alert_rows = session.exec(
+            select(AlertConfig).where(
+                AlertConfig.endpoint_id == endpoint_id,
+                AlertConfig.is_active == True,
+            )
+        ).all()
 
         for row in alert_rows:
-            if row.id is None: continue
-            state_row = session.exec(select(AlertState).where(AlertState.config_id==row.id)).first()
+            if row.id is None:
+                continue
+            state_row = session.exec(
+                select(AlertState).where(AlertState.config_id == row.id)
+            ).first()
             if state_row is None:
-                state_row = AlertState(config_id = row.id)
+                state_row = AlertState(config_id=row.id)
 
             if is_up:
                 if state_row.alert_sent:
                     queue_alert(row, endpoint_id, url, checked_at, True)
-
                 state_row.current_streak = 0
                 state_row.alert_sent = False
             else:
@@ -134,5 +155,12 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
                     state_row.last_alert_at = datetime.now(timezone.utc)
 
             session.add(state_row)
+
         session.commit()
-                
+
+
+    if should_publish:
+        try:
+            publish_status_change(endpoint_id, status_code, checked_at, is_up)
+        except Exception:
+            log.exception("status_publish_failed", endpoint_id=endpoint_id)

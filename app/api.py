@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
-from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db
+from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db, get_endpoint_with_status
 from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
 from app.realtime import redis_subscriber, router as realtime_router
 from app.logging_config import configure_logging
@@ -119,9 +119,8 @@ def set_endpoint(endpoint_create: EndpointCreate, user: User = Depends(get_curre
     
 @app.get("/endpoints/{endpoint_id}", response_model=EndpointRead)
 def get_endpoint(endpoint_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    user_id = user.id
-    assert user_id is not None
-    endpoint = get_owned_endpoint(endpoint_id, user_id, session)
+    assert user.id is not None
+    endpoint = get_endpoint_with_status(endpoint_id, user.id, session)
     if endpoint is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return endpoint
@@ -133,15 +132,13 @@ def get_all_endpoints(limit: int = Query(default=30, le=100, ge=1), offset: int 
     rows = get_endpoints_with_status(user_id, session, limit, offset)
     return rows
 
-@app.patch("/endpoints/{endpoint_id}", response_model = EndpointRead)
+@app.patch("/endpoints/{endpoint_id}", response_model=EndpointRead)
 def update_endpoint(endpoint_id: int, endpoint_update: EndpointUpdate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    assert user.id is not None
     update_data = endpoint_update.model_dump(exclude_unset=True)
-    user_id = user.id
-    assert user_id is not None
-    updated = update_endpoint_in_db(endpoint_id, user_id, session, update_data)
-    if updated is None:
+    if update_endpoint_in_db(endpoint_id, user.id, session, update_data) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return updated
+    return get_endpoint_with_status(endpoint_id, user.id, session)
 
 @app.delete("/endpoints/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_endpoint(endpoint_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_session)):

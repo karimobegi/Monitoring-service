@@ -5,9 +5,31 @@ from sqlalchemy import text
 from collections.abc import Sequence
 
 from app.models import User, Endpoint, EndpointRead, AlertChannel, AlertConfig, AlertState
-from app.config import DATABASE_URL
+from app.config import DATABASE_URL, OVERDUE_GRACE_SECONDS
+
 
 engine = create_engine(DATABASE_URL) 
+
+_ENDPOINT_STATUS_SQL = """
+SELECT e.id, e.url, e.interval_seconds, e.is_active, e.next_check_at,
+       lr.status_code AS latest_status_code,
+       lr.checked_at  AS latest_checked_at,
+       e.is_active
+         AND now() > GREATEST(lr.checked_at, e.monitoring_since)
+                     + (e.interval_seconds + :grace) * INTERVAL '1 second'
+         AS is_overdue
+FROM endpoint e
+LEFT JOIN LATERAL (
+    SELECT status_code, checked_at
+    FROM checkresult
+    WHERE endpoint_id = e.id
+    ORDER BY checked_at DESC
+    LIMIT 1
+) lr ON true
+WHERE e.user_id = :user_id
+"""
+
+_RESCHEDULE_FIELDS = {"interval_seconds", "url"}
 
 def get_session():
     with Session(engine) as session:
@@ -19,7 +41,7 @@ def add_user(user: User, session: Session):
 
 def add_endpoint(user_id: int, url: str, interval: int, session: Session):
     try:
-        endpoint = Endpoint(user_id = user_id, url = url, interval_seconds = interval, next_check_at=datetime.now(timezone.utc))
+        endpoint = Endpoint(user_id = user_id, url = url, interval_seconds = interval, next_check_at=datetime.now(timezone.utc)) #type: ignore
     except ValueError as e:
         raise ValueError(f"Validation failed: {e}")
 
@@ -40,30 +62,34 @@ def get_owned_endpoint(endpoint_id: int, user_id: int, session: Session):
 def get_all_owned_endpoints(user_id: int, session: Session, limit: int = 30, offset: int = 0):
      rows = session.exec((select(Endpoint).where(Endpoint.user_id == user_id)).order_by(Endpoint.id).limit(limit).offset(offset)).all() #type: ignore
      return rows
-def get_endpoints_with_status(user_id: int, session: Session, limit: int = 30, offset: int = 0): 
-    rows = session.execute(text("""SELECT e.id, e.url, e.interval_seconds, e.is_active, e.next_check_at, 
-                                        latest.status_code AS latest_status_code, 
-                                        latest.checked_at AS latest_checked_at 
-                                    FROM endpoint e 
-                                    LEFT JOIN (
-                                        SELECT DISTINCT ON (endpoint_id) endpoint_id, status_code, checked_at 
-                                        FROM checkresult 
-                                        ORDER BY endpoint_id, checked_at DESC 
-                                    ) latest ON latest.endpoint_id = e.id 
-                                    WHERE e.user_id = :user_id 
-                                    ORDER BY e.id 
-                                    LIMIT :limit OFFSET :offset """), 
-                                    {"user_id": user_id, "limit": limit, "offset": offset},).all() 
+
+def get_endpoints_with_status(user_id: int, session: Session, limit: int = 30, offset: int = 0) -> list[EndpointRead]:
+    rows = session.execute(
+        text(_ENDPOINT_STATUS_SQL + " ORDER BY e.id LIMIT :limit OFFSET :offset"),
+        {"user_id": user_id, "grace": OVERDUE_GRACE_SECONDS, "limit": limit, "offset": offset},
+    ).all()
     return [EndpointRead(**row._mapping) for row in rows]
+
+def get_endpoint_with_status(endpoint_id: int, user_id: int, session: Session) -> EndpointRead | None:
+    row = session.execute(
+        text(_ENDPOINT_STATUS_SQL + " AND e.id = :endpoint_id"),
+        {"user_id": user_id, "endpoint_id": endpoint_id, "grace": OVERDUE_GRACE_SECONDS},
+    ).first()
+    return EndpointRead(**row._mapping) if row else None
 
 def update_endpoint_in_db(endpoint_id: int, user_id: int, session: Session, update_data: dict):
     endpoint = get_owned_endpoint(endpoint_id, user_id, session)
     if endpoint is None:
         return None
-    endpoint.sqlmodel_update(update_data)
+    changed = {k: v for k, v in update_data.items() if getattr(endpoint, k) != v}
+    reschedule = bool(_RESCHEDULE_FIELDS & changed.keys()) or changed.get("is_active") is True
+    endpoint.sqlmodel_update(changed)
+    if reschedule:
+        now = datetime.now(timezone.utc)
+        endpoint.next_check_at = now      # check immediately under the new settings
+        endpoint.monitoring_since = now   # restart the overdue clock
     session.add(endpoint)
     session.commit()
-    session.refresh(endpoint)
     return endpoint
 
 def delete_endpoint_in_db(endpoint_id: int, user_id: int, session: Session):

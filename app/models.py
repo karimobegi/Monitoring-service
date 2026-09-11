@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index, desc
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index, desc, text as sa_text
 from enum import Enum
 from urllib.parse import urlsplit
 from pydantic import field_validator
@@ -47,7 +47,7 @@ class EndpointUpdate(SQLModel):
     interval_seconds: int | None = Field(default=None, ge=10, le=86400)
     is_active: bool | None = None
     url: str | None = None
-    
+
     @field_validator("url")
     @classmethod
     def check_url(cls, value: str | None) -> str | None:
@@ -59,6 +59,7 @@ class EndpointRead(EndpointBase):
     next_check_at: datetime
     latest_status_code: int | None = None
     latest_checked_at: datetime | None = None
+    is_overdue: bool = False
 
 
 class EndpointCreate(EndpointBase):
@@ -71,14 +72,17 @@ class EndpointCreate(EndpointBase):
 class Endpoint(EndpointBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(
-    sa_column=Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     )
     is_active: bool = True
     next_check_at: datetime = Field(
-    sa_column=Column(DateTime(timezone=True), nullable=False)
+        sa_column=Column(DateTime(timezone=True), nullable=False)
     )
     __table_args__ = (
         Index("ix_endpoint_due", "is_active", "next_check_at"),
+    )
+    monitoring_since: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=sa_text("now()"))
     )
 
 

@@ -22,3 +22,4 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "json")
 
 MAX_ENDPOINTS_PER_USER = int(os.getenv("MAX_ENDPOINTS_PER_USER", "30"))
+OVERDUE_GRACE_SECONDS = int(os.getenv("OVERDUE_GRACE_SECONDS", "30"))

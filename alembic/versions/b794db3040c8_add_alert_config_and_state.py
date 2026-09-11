@@ -29,7 +29,7 @@ def upgrade() -> None:
     sa.Column('endpoint_id', sa.Integer(), nullable=False),
     sa.Column('threshold', sa.Integer(), nullable=False),
     sa.Column('channel', sa.Enum('EMAIL', 'WEBHOOK', name='alertchannel'), nullable=False),
-    sa.Column('target', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('target', sqlmodel.sql.sqltypes.AutoString(), nullable=False), #type: ignore
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.ForeignKeyConstraint(['endpoint_id'], ['endpoint.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ondelete='CASCADE'),

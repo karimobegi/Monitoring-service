@@ -88,6 +88,7 @@ def endpoint() -> Endpoint:
             user_id=user.id,
             url="https://service.test/health",
             next_check_at=datetime.now(timezone.utc),
+            monitoring_since=datetime.now(timezone.utc) - timedelta(seconds=200)
         )
         session.add(ep)
         session.commit()
