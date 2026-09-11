@@ -5,10 +5,13 @@ from fastapi import HTTPException
 import httpx
 import structlog
 from celery.signals import task_failure, task_retry
+from sqlalchemy import text
+from sqlmodel import Session
 
 from app.celery_app import celery_app
 from app.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
 from app.worker_metrics import ALERT_DELIVERY_FAILURES, ALERTS_SENT
+from app.db import engine
 
 log = structlog.get_logger(__name__)
 
@@ -19,7 +22,7 @@ log = structlog.get_logger(__name__)
     retry_jitter=True,
     max_retries=5,
 )
-def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
+def send_email_alert(config_id: int, target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
     kind = "recovery" if is_recovery else "down"
     structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind=kind)
     msg = EmailMessage()
@@ -51,7 +54,7 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
             Monitoring System
         """)
     msg.set_content(body)
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
         if SMTP_USER:
             s.starttls()
             s.login(SMTP_USER, SMTP_PASSWORD)
@@ -66,7 +69,7 @@ def send_email_alert(target: str, endpoint_id: int, url: str, timestamp: str, is
     retry_jitter=True,
     max_retries=5,    
 )
-def send_webhook_alert(target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
+def send_webhook_alert(config_id: int, target: str, endpoint_id: int, url: str, timestamp: str, is_recovery: bool) -> None:
     kind = "recovery" if is_recovery else "down"
     structlog.contextvars.bind_contextvars(endpoint_id=endpoint_id, kind=kind)
     event = "endpoint_recovered" if is_recovery else "endpoint_down"
@@ -97,8 +100,24 @@ def count_alert_retry(sender=None, **kwargs):
         ALERT_DELIVERY_FAILURES.labels(channel=channel, reason="retry").inc()
 
 
+def mark_alert_undelivered(config_id: int) -> None:
+    """A down alert gave up: record that the user was never told, so the next failed check alerts again."""
+    with Session(engine) as session:
+        session.execute(
+            text("UPDATE alertstate SET alert_sent = false WHERE config_id = :config_id AND alert_sent"),
+            {"config_id": config_id},
+        )
+        session.commit()
+
+
 @task_failure.connect
-def count_alert_exhausted(sender=None, **kwargs):
+def handle_alert_exhausted(sender=None, args=None, **_):
     channel = CHANNEL_BY_TASK.get(getattr(sender, "name", ""))
-    if channel:
-        ALERT_DELIVERY_FAILURES.labels(channel=channel, reason="exhausted").inc()
+    if not channel or not args:
+        return
+    ALERT_DELIVERY_FAILURES.labels(channel=channel, reason="exhausted").inc()
+
+    config_id, *_rest, is_recovery = args  # task args: (config_id, ..., is_recovery)
+    if not is_recovery:
+        mark_alert_undelivered(config_id)
+        log.warning("alert_undelivered", alert_config_id=config_id, channel=channel)

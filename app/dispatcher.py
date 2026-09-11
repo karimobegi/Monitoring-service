@@ -18,7 +18,7 @@ log = structlog.get_logger(__name__)
 
 def queue_alert(config: AlertConfig, endpoint_id: int, url: str,
                 timestamp: str, is_recovery: bool) -> None:
-    args = (config.target, endpoint_id, url, timestamp, is_recovery)
+    args = (config.id, config.target, endpoint_id, url, timestamp, is_recovery)
     if config.channel == AlertChannel.EMAIL:
         send_email_alert.delay(*args) #type: ignore
     elif config.channel == AlertChannel.WEBHOOK:

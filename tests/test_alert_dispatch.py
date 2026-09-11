@@ -1,4 +1,5 @@
 from app.models import AlertChannel
+from app.alerts import handle_alert_exhausted, send_email_alert
 
 
 def test_alert_fires_when_failures_reach_threshold(add_alert, run_check, queued):
@@ -59,3 +60,26 @@ def test_inactive_config_never_alerts(add_alert, run_check, queued):
     run_check(500)
 
     assert queued.kinds() == []
+
+def test_undelivered_down_alert_is_sent_again_on_next_failure(add_alert, run_check, queued):
+    add_alert(threshold=3)
+    for _ in range(3):
+        run_check(500)
+    assert queued.kinds() == ["down"]
+
+    # Delivery gives up, using the exact args queue_alert produced
+    handle_alert_exhausted(sender=send_email_alert, args=queued.email.delay.call_args.args)
+    run_check(500)
+
+    assert queued.kinds() == ["down", "down"]
+
+
+def test_no_recovery_after_undelivered_down_alert(add_alert, run_check, queued):
+    add_alert(threshold=3)
+    for _ in range(3):
+        run_check(500)
+    handle_alert_exhausted(sender=send_email_alert, args=queued.email.delay.call_args.args)
+
+    run_check(200)
+
+    assert queued.kinds() == ["down"]

@@ -64,9 +64,7 @@ class QueuedAlerts:
 
     def kinds(self, channel: str = "email") -> list[str]:
         fake = getattr(self, channel)
-        # queue_alert calls .delay(target, endpoint_id, url, timestamp, is_recovery)
-        return ["recovery" if call.args[4] else "down" for call in fake.delay.call_args_list]
-
+        return ["recovery" if call.args[-1] else "down" for call in fake.delay.call_args_list]
 
 @pytest.fixture(autouse=True)
 def queued(monkeypatch) -> QueuedAlerts:
