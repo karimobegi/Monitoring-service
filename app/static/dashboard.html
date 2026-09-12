@@ -67,6 +67,8 @@
   .state.unknown { color: var(--unknown); }
   .code, .age { color: var(--dim); }
   .age[data-stale="1"] { color: var(--down); }
+  tr[data-overdue="1"] .state { color: var(--unknown); }
+  tr[data-overdue="1"] .url { color: var(--dim); }
   .empty { color: var(--dim); padding: 24px 10px; }
 </style>
 </head>
@@ -96,7 +98,8 @@
 const API_BASE = "http://localhost:8000";
 const WS_BASE  = "ws://localhost:8000/ws";
 
-const STALE_AFTER_MS = 5 * 60 * 1000;   // colour "last checked" red past this
+const POLL_INTERVAL_MS = 30_000;
+let pollTimer = null;
 const MAX_BACKOFF_MS = 30_000;
 
 // endpoint_id -> { endpoint, status_code, checked_at (Date|null), tr }
@@ -129,12 +132,17 @@ async function start() {
   $("disconnect").hidden = false;
 
   const ok = await loadSnapshot();
-  if (ok) openSocket();
+  if (ok) {
+    openSocket();
+    clearInterval(pollTimer);
+    pollTimer = setInterval(loadSnapshot, POLL_INTERVAL_MS);
+  }
 }
 
 function stop() {
   stopped = true;
   clearTimeout(retryTimer);
+  clearInterval(pollTimer);
   if (socket) { socket.onclose = null; socket.close(1000, "client stop"); socket = null; }
   setConnection("idle", "Not connected");
   $("connect").hidden = false;
@@ -227,38 +235,52 @@ document.addEventListener("visibilitychange", () => {
 
 function render(endpoints) {
   const tbody = $("rows");
-  tbody.innerHTML = "";
-  rows.clear();
+  const seen = new Set();
 
   if (!endpoints.length) {
     tbody.innerHTML = `<tr><td class="empty" colspan="4">No endpoints yet. Add one through the API to see it here.</td></tr>`;
+    rows.clear();
     return;
   }
+  if (tbody.querySelector(".empty")) tbody.innerHTML = "";
 
   for (const ep of endpoints) {
-    const latest = ep.latest_result || ep.last_result || ep;
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td class="url"></td><td class="state"></td><td class="code"></td><td class="age"></td>`;
-    tbody.appendChild(tr);
+    seen.add(ep.id);
+    let row = rows.get(ep.id);
+    const checked_at = ep.latest_checked_at ? new Date(ep.latest_checked_at) : null;
 
-    const row = {
-      endpoint: ep,
-      status_code: ep.latest_status_code ?? null,
-      checked_at: ep.latest_checked_at ? new Date(ep.latest_checked_at) : null,
-      tr,
-    };
-    rows.set(ep.id, row);
+    if (!row) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="url"></td><td class="state"></td><td class="code"></td><td class="age"></td>`;
+      tbody.appendChild(tr);
+      row = { endpoint: ep, status_code: null, checked_at: null, is_overdue: false, tr };
+      rows.set(ep.id, row);
+    }
+
+    row.endpoint = ep;
+    row.is_overdue = !!ep.is_overdue;
+    if (!row.checked_at || (checked_at && checked_at >= row.checked_at)) {
+      row.status_code = ep.latest_status_code ?? null;
+      row.checked_at = checked_at;
+    }
     paint(row);
+  }
+
+  for (const [id, row] of rows) {
+    if (!seen.has(id)) { row.tr.remove(); rows.delete(id); }
   }
 }
 
 function applyUpdate(msg) {
   const row = rows.get(msg.endpoint_id);
-  if (!row) return loadSnapshot();   // endpoint we've never seen: resync rather than guess
+  if (!row) return loadSnapshot();
+
+  const checked_at = msg.checked_at ? new Date(msg.checked_at) : new Date();
+  if (row.checked_at && checked_at < row.checked_at) return;  // stale message, ignore
 
   row.status_code = msg.status_code ?? null;
-  row.checked_at = msg.checked_at ? new Date(msg.checked_at) : new Date();
+  row.checked_at = checked_at;
+  row.is_overdue = false;
   paint(row);
 
   row.tr.dataset.fresh = "1";
@@ -275,6 +297,7 @@ function paint(row) {
   const state = healthOf(row.status_code, row.checked_at);
   stateCell.textContent = state === "up" ? "Up" : state === "down" ? "Down" : "Unknown";
   stateCell.className = `state ${state}`;
+  row.tr.dataset.overdue = row.is_overdue ? "1" : "0";
 
   codeCell.textContent = row.status_code ?? "—";
   paintAge(row);
@@ -291,8 +314,8 @@ function paintAge(row) {
   const cell = row.tr.children[3];
   if (!row.checked_at) { cell.textContent = "never"; cell.dataset.stale = "0"; return; }
   const ms = Date.now() - row.checked_at.getTime();
-  cell.textContent = humanAge(ms);
-  cell.dataset.stale = ms > STALE_AFTER_MS ? "1" : "0";
+  cell.textContent = row.is_overdue ? `no check for ${humanAge(ms).replace(" ago", "")}` : humanAge(ms);
+  cell.dataset.stale = row.is_overdue ? "1" : "0";
   cell.title = row.checked_at.toLocaleString();
 }
 

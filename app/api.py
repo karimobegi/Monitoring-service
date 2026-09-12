@@ -13,7 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
 from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db, get_endpoint_with_status
-from app.models import User, UserCreate, UserRead, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
+from app.models import User, UserCreate, UserRead, Endpoint, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
 from app.realtime import redis_subscriber, router as realtime_router
 from app.logging_config import configure_logging
 from app.api_metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
@@ -106,6 +106,14 @@ def login(request: Request, form_data: Annotated[OAuth2PasswordRequestForm, Depe
 def set_endpoint(endpoint_create: EndpointCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     user_id = user.id
     assert user_id is not None
+    count = session.exec(
+        select(func.count()).select_from(Endpoint).where(Endpoint.user_id == user_id)
+    ).one()
+    if count >= MAX_ENDPOINTS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Endpoint limit reached ({MAX_ENDPOINTS_PER_USER}).",
+        )
     try:
         endpoint = add_endpoint(user_id, endpoint_create.url, endpoint_create.interval_seconds, session)
 

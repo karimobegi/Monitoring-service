@@ -22,10 +22,13 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlmodel import Session, select
+from fastapi.testclient import TestClient
 
 from app.db import engine
 from app.dispatcher import perform_check
 from app.models import AlertChannel, AlertConfig, CheckResult, Endpoint, User
+from app.auth import create_access_token
+from app.realtime import connections
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = '"user", endpoint, checkresult, alertconfig, alertstate'
@@ -145,3 +148,18 @@ def results(endpoint):
             return list(session.exec(query).all())
 
     return _results
+
+@pytest.fixture
+def client():
+    from app.api import app
+    return TestClient(app)
+
+@pytest.fixture
+def token(endpoint):
+    return create_access_token({"sub": str(endpoint.user_id)})
+
+@pytest.fixture(autouse=True)
+def clean_connections():
+    connections.clear()
+    yield
+    connections.clear()

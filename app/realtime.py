@@ -47,6 +47,21 @@ async def dashboard(websocket: WebSocket, user: User = Depends(ws_user)):
         for eid in ids:
             connections[eid].discard(websocket)
         WEBSOCKET_CONNECTIONS.dec()
+        
+async def handle_message(message) -> None:
+    if message["type"] != "message":
+        return
+    try:
+        payload = json.loads(message["data"])
+        eid = payload["endpoint_id"]
+        for ws in list(connections.get(eid, set())):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                pass
+    except Exception:
+        log.exception("pubsub_message_invalid", data=message["data"])
+
 
 async def redis_subscriber() -> None:
     client = redis.from_url(REDIS_URL)
@@ -54,26 +69,13 @@ async def redis_subscriber() -> None:
     await ps.subscribe(STATUS_CHANNEL)
     try:
         async for message in ps.listen():
-            if message["type"] != "message":
-                continue
-            try:
-                payload = json.loads(message["data"])
-                eid = payload["endpoint_id"]
-                for ws in list(connections.get(eid, set())):
-                    try:
-                        await ws.send_json(payload)
-                    except Exception:
-                        pass
-            except Exception:
-                log.exception("pubsub_message_invalid", data=message["data"])
-
+            await handle_message(message)
     except asyncio.CancelledError:
         pass
     finally:
         await ps.unsubscribe()
         await ps.aclose()
         await client.aclose()
-
 
 
 
