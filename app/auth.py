@@ -11,7 +11,8 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models import User
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
-ACCESS_TOKEN_EXPIRE_TIME = timedelta(ACCESS_TOKEN_EXPIRE_MINUTES)
+
+ACCESS_TOKEN_EXPIRE_TIME = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
 class Token(BaseModel):
     access_token: str

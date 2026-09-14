@@ -78,9 +78,7 @@
   <p class="sub">Snapshot over HTTP, changes over WebSocket.</p>
 
   <div class="bar">
-    <input id="token" type="password" placeholder="Paste your access token" autocomplete="off">
-    <button id="connect">Connect</button>
-    <button id="disconnect" hidden>Disconnect</button>
+    <button id="signout">Sign out</button>
     <span class="conn" id="conn" data-state="idle"><span class="dot"></span><span id="connText">Not connected</span></span>
   </div>
 
@@ -99,38 +97,43 @@ const API_BASE = "http://localhost:8000";
 const WS_BASE  = "ws://localhost:8000/ws";
 
 const POLL_INTERVAL_MS = 30_000;
-let pollTimer = null;
 const MAX_BACKOFF_MS = 30_000;
 
-// endpoint_id -> { endpoint, status_code, checked_at (Date|null), tr }
+// endpoint_id -> { endpoint, status_code, checked_at (Date|null), is_overdue, tr }
 const rows = new Map();
 
-let token = null;
 let socket = null;
-let attempt = 0;          // consecutive failed connects, drives backoff
+let attempt = 0;           // consecutive failed connects, drives backoff
 let retryTimer = null;
-let stopped = true;       // user asked to stop; suppresses all reconnects
+let pollTimer = null;
+let stopped = true;        // suppresses all reconnects
 let hadConnection = false; // true once a socket has opened, so we know to resync
 
 const $ = (id) => document.getElementById(id);
 
+const token = localStorage.getItem("token");
+if (!token) location.replace("login.html");
 
-$("connect").addEventListener("click", start);
-$("disconnect").addEventListener("click", stop);
-$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
+$("signout").addEventListener("click", signOut);
 
-async function start() {
-  const value = $("token").value.trim();
-  if (!value) return setMessage("Paste an access token to connect.");
+function stop() {
+  stopped = true;
+  clearTimeout(retryTimer);
+  clearInterval(pollTimer);
+  if (socket) { socket.onclose = null; socket.close(1000, "client stop"); socket = null; }
+  setConnection("idle", "Not connected");
+}
 
-  token = value;
+function signOut() {
+  stop();
+  localStorage.removeItem("token");
+  location.replace("login.html");
+}
+
+async function begin() {
   stopped = false;
   attempt = 0;
   hadConnection = false;
-  setMessage("");
-  $("connect").hidden = true;
-  $("disconnect").hidden = false;
-
   const ok = await loadSnapshot();
   if (ok) {
     openSocket();
@@ -139,16 +142,7 @@ async function start() {
   }
 }
 
-function stop() {
-  stopped = true;
-  clearTimeout(retryTimer);
-  clearInterval(pollTimer);
-  if (socket) { socket.onclose = null; socket.close(1000, "client stop"); socket = null; }
-  setConnection("idle", "Not connected");
-  $("connect").hidden = false;
-  $("disconnect").hidden = true;
-}
-
+begin();
 /* ---------- 1. snapshot over HTTP ---------- */
 
 async function loadSnapshot() {
@@ -157,8 +151,7 @@ async function loadSnapshot() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status === 401 || res.status === 403) {
-      stop();
-      setMessage("Token rejected. Log in again and paste a fresh one.");
+      signOut();
       return false;
     }
     if (!res.ok) {
@@ -203,9 +196,12 @@ function openSocket() {
     socket = null;
     if (stopped) return;
     // 1000 = we closed it. 1008 = server rejected the token; retrying loops forever.
-    if (event.code === 1000 || event.code === 1008) {
+    if (event.code === 1008) {
+      signOut();
+      return;
+    }
+    if (event.code === 1000){
       stop();
-      if (event.code === 1008) setMessage("Token rejected on the socket. Paste a fresh one.");
       return;
     }
     scheduleReconnect();

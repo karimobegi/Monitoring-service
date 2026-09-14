@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Uptime monitor</title>
+<style>
+  :root {
+    --bg: #14171a; --panel: #1b1f24; --line: #2a3038;
+    --text: #dfe4ea; --dim: #7d8894; --up: #4ec9a0; --down: #e5666b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  form {
+    width: 100%; max-width: 340px; padding: 28px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 20px; }
+  label { display: block; color: var(--dim); margin: 0 0 4px; }
+  input {
+    width: 100%; font: inherit; color: inherit; margin: 0 0 14px;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px;
+  }
+  button {
+    width: 100%; font: inherit; color: inherit; cursor: pointer;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px;
+  }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button:disabled { color: var(--dim); cursor: default; }
+  :focus-visible { outline: 2px solid var(--up); outline-offset: 1px; }
+  #message { color: var(--down); min-height: 21px; margin: 12px 0 0; }
+</style>
+</head>
+<body>
+<form id="form">
+  <h1>Uptime monitor</h1>
+  <p class="sub">Sign in to continue.</p>
+
+  <label for="email">Email</label>
+  <input id="email" type="email" autocomplete="username" required>
+
+  <label for="password">Password</label>
+  <input id="password" type="password" autocomplete="current-password" required>
+
+  <button id="submit" type="submit">Sign in</button>
+  <p id="message"></p>
+</form>
+
+<script>
+const API_BASE = "http://localhost:8000";
+const $ = (id) => document.getElementById(id);
+
+// Already signed in? Don't make them do it twice.
+if (localStorage.getItem("token")) location.replace("dashboard.html");
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  if (!email || !password) return;
+
+  $("submit").disabled = true;
+  $("message").textContent = "";
+
+  try {
+    // /token expects form encoding, not JSON, and the field is `username`.
+    const res = await fetch(`${API_BASE}/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ username: email, password }),
+    });
+
+    if (res.status === 401) {
+      $("message").textContent = "Incorrect email or password.";
+      return;
+    }
+    if (res.status === 429) {
+      $("message").textContent = "Too many attempts. Wait a minute and try again.";
+      return;
+    }
+    if (!res.ok) {
+      $("message").textContent = `Sign in failed (HTTP ${res.status}).`;
+      return;
+    }
+
+    const data = await res.json();
+    localStorage.setItem("token", data.access_token);
+    location.replace("dashboard.html");
+  } catch {
+    $("message").textContent = "Could not reach the server.";
+  } finally {
+    $("submit").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
