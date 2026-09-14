@@ -13,6 +13,7 @@ from app.models import CheckResult, AlertConfig, AlertState, AlertChannel
 from app.celery_app import celery_app
 from app.alerts import send_email_alert, send_webhook_alert
 from app.worker_metrics import ALERTS_QUEUED, CHECKS, CHECK_DURATION, CHECK_LAG
+from app.config import RETENTION_DAYS, PURGE_BATCH_SIZE
 
 log = structlog.get_logger(__name__)
 
@@ -164,3 +165,23 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
             publish_status_change(endpoint_id, status_code, checked_at, is_up)
         except Exception:
             log.exception("status_publish_failed", endpoint_id=endpoint_id)
+
+@celery_app.task
+def purge_old_results():
+    deleted = 0
+    with Session(engine) as session:
+        while True:
+            result = session.execute(text("""
+                DELETE FROM checkresult
+                WHERE id IN (
+                    SELECT id FROM checkresult
+                    WHERE checked_at < now() - (:days * INTERVAL '1 day')
+                    LIMIT :batch
+                )
+            """), {"days": RETENTION_DAYS, "batch": PURGE_BATCH_SIZE})
+            session.commit()
+            if not result.rowcount: #type: ignore
+                break
+            deleted += result.rowcount #type: ignore
+    if deleted:
+        log.info("results_purged", deleted=deleted, retention_days=RETENTION_DAYS)

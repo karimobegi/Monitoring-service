@@ -1,6 +1,7 @@
 import structlog
 from celery import Celery, Task
 from celery.signals import setup_logging, task_postrun, task_prerun, worker_process_init, worker_ready
+from celery.schedules import crontab
 import os
 
 from app.config import REDIS_URL
@@ -54,5 +55,9 @@ celery_app.conf.beat_schedule = {
     "dispatch_due_checks": {
         "task": "app.dispatcher.dispatch_due_checks",
         "schedule": 10,
+    },
+        "purge_old_results": {
+        "task": "app.dispatcher.purge_old_results",
+        "schedule": crontab(hour=3, minute=0),
     }
 }
