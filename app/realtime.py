@@ -17,7 +17,7 @@ from app.api_metrics import WEBSOCKET_CONNECTIONS
 log = structlog.get_logger(__name__)
 
 router = APIRouter()
-connections: dict[int, set[WebSocket]] = defaultdict(set)
+connections: dict[int, set[WebSocket]] = defaultdict(set) #keyed by user_id now
 
 async def ws_user(websocket: WebSocket, token: str | None = Query(default = None)) -> User:
     if token is None:
@@ -32,29 +32,24 @@ async def ws_user(websocket: WebSocket, token: str | None = Query(default = None
 async def dashboard(websocket: WebSocket, user: User = Depends(ws_user)):
     await websocket.accept()
     WEBSOCKET_CONNECTIONS.inc()
-    ids: list[int] = []
+    assert user.id is not None
     try:
-        with Session(engine) as session:
-            rows = get_all_owned_endpoints(user.id, session)  # type: ignore
-            ids = [e.id for e in rows if e.id is not None]
-        for eid in ids:
-            connections[eid].add(websocket)
+        connections[user.id].add(websocket)
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        for eid in ids:
-            connections[eid].discard(websocket)
+        connections[user.id].discard(websocket)
         WEBSOCKET_CONNECTIONS.dec()
-        
+
 async def handle_message(message) -> None:
     if message["type"] != "message":
         return
     try:
         payload = json.loads(message["data"])
-        eid = payload["endpoint_id"]
-        for ws in list(connections.get(eid, set())):
+        uid = payload["user_id"]
+        for ws in list(connections.get(uid, set())):
             try:
                 await ws.send_json(payload)
             except Exception:

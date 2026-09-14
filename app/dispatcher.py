@@ -9,7 +9,7 @@ import time
 
 from app.db import engine
 from app.events import publish_status_change
-from app.models import CheckResult, AlertConfig, AlertState, AlertChannel
+from app.models import CheckResult, AlertConfig, AlertState, AlertChannel, Endpoint
 from app.celery_app import celery_app
 from app.alerts import send_email_alert, send_webhook_alert
 from app.worker_metrics import ALERTS_QUEUED, CHECKS, CHECK_DURATION, CHECK_LAG
@@ -113,6 +113,9 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
             .order_by(desc(CheckResult.checked_at))
             .limit(1)
         ).first()
+        owner_id = session.exec(
+            select(Endpoint.user_id).where(Endpoint.id == endpoint_id)
+        ).first()
 
         # None means no prior result: a first check always publishes.
         prev_is_up = is_up_for(prev_result.status_code) if prev_result is not None else None
@@ -160,9 +163,9 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
         session.commit()
 
 
-    if should_publish:
+    if should_publish and owner_id is not None:
         try:
-            publish_status_change(endpoint_id, status_code, checked_at, is_up)
+            publish_status_change(endpoint_id, owner_id, status_code, checked_at, is_up)
         except Exception:
             log.exception("status_publish_failed", endpoint_id=endpoint_id)
 
