@@ -163,3 +163,21 @@ def clean_connections():
     connections.clear()
     yield
     connections.clear()
+
+@pytest.fixture
+def add_results(endpoint):
+    """Insert check results at 60s intervals ending now. Pass status codes;
+    None means no response (timeout/DNS/refused)."""
+    def _add(*status_codes: int | None) -> None:
+        base = datetime.now(timezone.utc) - timedelta(seconds=60 * len(status_codes))
+        with Session(engine) as session:
+            for i, code in enumerate(status_codes):
+                session.add(CheckResult(
+                    endpoint_id=endpoint.id,
+                    checked_at=base + timedelta(seconds=60 * i),
+                    status_code=code,
+                    error=None if code else "timeout",
+                    response_time_ms=100 + i if code else None,
+                ))
+            session.commit()
+    return _add

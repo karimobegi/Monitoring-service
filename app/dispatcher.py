@@ -167,7 +167,7 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
             log.exception("status_publish_failed", endpoint_id=endpoint_id)
 
 @celery_app.task
-def purge_old_results():
+def purge_old_results(batch_size: int = PURGE_BATCH_SIZE):
     deleted = 0
     with Session(engine) as session:
         while True:
