@@ -85,6 +85,24 @@ class Endpoint(EndpointBase, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=False, server_default=sa_text("now()"))
     )
 
+class Incident(SQLModel):
+    started_at: datetime
+    ended_at: datetime
+    duration_seconds: int
+    checks: int
+    error: str | None
+
+class EndpointAnalytics(SQLModel):
+    endpoint_id: int
+    window_days: int
+    total_checks: int
+    up_checks: int
+    uptime_percent: float | None      # None when there are no checks yet
+    p50_response_ms: float | None     # None when nothing succeeded
+    p95_response_ms: float | None
+    p99_response_ms: float | None
+    incidents: list[Incident]
+
 
 class CheckResult(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)

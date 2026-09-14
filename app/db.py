@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 from collections.abc import Sequence
 
-from app.models import User, Endpoint, EndpointRead, AlertChannel, AlertConfig, AlertState
+from app.models import User, Endpoint, EndpointRead, AlertChannel, AlertConfig, AlertState, Incident
 from app.config import DATABASE_URL, OVERDUE_GRACE_SECONDS
 
 
@@ -138,3 +138,59 @@ def update_alert_in_db(alert: AlertConfig, update_data: dict, session: Session):
 def delete_alert_in_db(alert: AlertConfig, session: Session):
     session.delete(alert)
     session.commit()
+
+def get_endpoint_summary(endpoint_id: int, session: Session) -> dict:
+    row = session.execute(text("""
+        SELECT
+            count(*)                                                AS total_checks,
+            count(*) FILTER (WHERE status_code BETWEEN 200 AND 399) AS up_checks,
+            percentile_cont(0.50) WITHIN GROUP (ORDER BY response_time_ms)
+                FILTER (WHERE response_time_ms IS NOT NULL) AS p50,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY response_time_ms)
+                FILTER (WHERE response_time_ms IS NOT NULL) AS p95,
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY response_time_ms)
+                FILTER (WHERE response_time_ms IS NOT NULL) AS p99
+        FROM checkresult
+        WHERE endpoint_id = :endpoint_id
+          AND checked_at >= now() - INTERVAL '7 days'
+    """), {"endpoint_id": endpoint_id}).one()
+    return dict(row._mapping)
+
+def get_endpoint_incidents(endpoint_id: int, session: Session) -> list[Incident]:
+    rows = session.execute(text("""
+        WITH marked AS (
+            SELECT checked_at, error,
+                   (status_code IS NOT NULL AND status_code BETWEEN 200 AND 399) AS is_up,
+                   lag(status_code IS NOT NULL AND status_code BETWEEN 200 AND 399)
+                       OVER (ORDER BY checked_at) AS prev_is_up
+            FROM checkresult
+            WHERE endpoint_id = :endpoint_id
+              AND checked_at >= now() - INTERVAL '7 days'
+        ),
+        grouped AS (
+            SELECT *,
+                   count(*) FILTER (WHERE is_up IS DISTINCT FROM prev_is_up)
+                       OVER (ORDER BY checked_at) AS run_id
+            FROM marked
+        )
+        SELECT min(checked_at) AS started_at,
+               max(checked_at) AS ended_at,
+               count(*)        AS checks,
+               min(error)      AS error
+        FROM grouped
+        WHERE NOT is_up
+        GROUP BY run_id
+        ORDER BY started_at DESC
+    """), {"endpoint_id": endpoint_id}).all()
+
+    return [
+        Incident(
+            started_at=r.started_at,
+            ended_at=r.ended_at,
+            duration_seconds=int((r.ended_at - r.started_at).total_seconds()),
+            checks=r.checks,
+            error=r.error,
+        )
+        for r in rows
+    ]
+    

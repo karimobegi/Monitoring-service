@@ -12,8 +12,8 @@ from contextlib import asynccontextmanager
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
-from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db, get_endpoint_with_status
-from app.models import User, UserCreate, UserRead, Endpoint, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate
+from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db, get_endpoint_with_status, get_endpoint_incidents, get_endpoint_summary
+from app.models import User, UserCreate, UserRead, Endpoint, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate, EndpointAnalytics
 from app.realtime import redis_subscriber, router as realtime_router
 from app.logging_config import configure_logging
 from app.api_metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
@@ -217,9 +217,28 @@ def delete_alert(endpoint_id: int, alert_id: int, user: User = Depends(get_curre
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     delete_alert_in_db(alert, session)
 
+@app.get("/endpoints/{endpoint_id}/analytics", response_model=EndpointAnalytics)
+def get_analytics(endpoint_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    assert user.id is not None
+    if get_owned_endpoint(endpoint_id, user.id, session) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
+    summary = get_endpoint_summary(endpoint_id, session)
+    incidents = get_endpoint_incidents(endpoint_id, session)
 
-    
+    total = summary["total_checks"]
+    up = summary["up_checks"]
 
+    return EndpointAnalytics(
+        endpoint_id=endpoint_id,
+        window_days=7,
+        total_checks=total,
+        up_checks=up,
+        uptime_percent=round(up / total * 100, 2) if total else None,
+        p50_response_ms=summary["p50"],
+        p95_response_ms=summary["p95"],
+        p99_response_ms=summary["p99"],
+        incidents=incidents,
+    )
 
     
