@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endpoint — Uptime monitor</title>
+<style>
+  :root {
+    --bg: #14171a; --panel: #1b1f24; --line: #2a3038;
+    --text: #dfe4ea; --dim: #7d8894; --up: #4ec9a0; --down: #e5666b; --unknown: #8a93a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+  a.back { color: var(--dim); text-decoration: none; }
+  a.back:hover { text-decoration: underline; }
+  h1 { font-size: 18px; font-weight: 600; margin: 12px 0 4px; word-break: break-all; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--dim); margin: 28px 0 10px; }
+  .sub { color: var(--dim); margin: 0 0 24px; }
+
+  .panel {
+    padding: 14px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px;
+  }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, button, select {
+    font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button:disabled { color: var(--dim); cursor: default; }
+  button.danger:hover:not(:disabled) { border-color: var(--down); color: var(--down); }
+  :focus-visible { outline: 2px solid var(--up); outline-offset: 1px; }
+  label { color: var(--dim); }
+
+  .stats { display: flex; gap: 32px; flex-wrap: wrap; }
+  .stat .value { font-size: 20px; font-weight: 600; }
+  .stat .label { color: var(--dim); }
+  .state { font-weight: 600; }
+  .state.up { color: var(--up); }
+  .state.down { color: var(--down); }
+  .state.unknown { color: var(--unknown); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 500; color: var(--dim); padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px; border-bottom: 1px solid var(--line); }
+  .empty { color: var(--dim); padding: 20px 10px; }
+  #message { color: var(--down); min-height: 21px; margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="dashboard.html">&larr; All endpoints</a>
+  <h1 id="url">Loading…</h1>
+  <p class="sub"><span id="state" class="state unknown">—</span> · checked <span id="checked">never</span></p>
+
+  <p id="message"></p>
+
+  <div class="panel bar">
+    <label for="interval">Interval</label>
+    <input id="interval" type="number" min="10" max="86400" style="width:90px">
+    <label for="seconds">seconds</label>
+    <button id="save">Save</button>
+    <button id="toggle">Pause</button>
+    <button id="delete" class="danger" style="margin-left:auto">Delete</button>
+  </div>
+
+  <h2>Last 7 days</h2>
+  <div class="panel stats">
+    <div class="stat"><div class="value" id="uptime">—</div><div class="label">uptime</div></div>
+    <div class="stat"><div class="value" id="checks">—</div><div class="label">checks</div></div>
+    <div class="stat"><div class="value" id="p50">—</div><div class="label">p50</div></div>
+    <div class="stat"><div class="value" id="p95">—</div><div class="label">p95</div></div>
+    <div class="stat"><div class="value" id="p99">—</div><div class="label">p99</div></div>
+  </div>
+
+  <h2>Incidents</h2>
+  <table>
+    <thead><tr><th>Started</th><th>Ended</th><th>Duration</th><th>Checks</th><th>Error</th></tr></thead>
+    <tbody id="incidents"></tbody>
+  </table>
+</main>
+
+<script>
+const API_BASE = "http://localhost:8000";
+const $ = (id) => document.getElementById(id);
+
+const token = localStorage.getItem("token");
+if (!token) location.replace("login.html");
+
+const id = new URLSearchParams(location.search).get("id");
+if (!id) location.replace("dashboard.html");
+
+let endpoint = null;
+
+function signOut() {
+  localStorage.removeItem("token");
+  location.replace("login.html");
+}
+
+// Every call goes through here so the 401 path is handled in exactly one place.
+async function api(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) },
+  });
+  if (res.status === 401 || res.status === 403) { signOut(); throw new Error("unauthorized"); }
+  if (res.status === 404) { location.replace("dashboard.html"); throw new Error("not found"); }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `HTTP ${res.status}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+async function load() {
+  try {
+    // Independent requests: run them together rather than one after the other.
+    const [ep, analytics] = await Promise.all([
+      api(`/endpoints/${id}`),
+      api(`/endpoints/${id}/analytics`),
+    ]);
+    endpoint = ep;
+    paintEndpoint(ep);
+    paintAnalytics(analytics);
+  } catch (err) {
+    if (err.message !== "unauthorized" && err.message !== "not found") setMessage(err.message);
+  }
+}
+
+function paintEndpoint(ep) {
+  document.title = `${ep.url} — Uptime monitor`;
+  $("url").textContent = ep.url;
+  $("interval").value = ep.interval_seconds;
+  $("toggle").textContent = ep.is_active ? "Pause" : "Resume";
+
+  const state = !ep.latest_checked_at ? "unknown"
+    : ep.latest_status_code == null ? "down"
+    : ep.latest_status_code >= 200 && ep.latest_status_code < 400 ? "up" : "down";
+  const labels = { up: "Up", down: "Down", unknown: "Never checked" };
+  $("state").textContent = ep.is_active ? labels[state] : "Paused";
+  $("state").className = `state ${ep.is_active ? state : "unknown"}`;
+
+  $("checked").textContent = ep.latest_checked_at
+    ? (ep.is_overdue ? `${ago(ep.latest_checked_at)} — overdue` : ago(ep.latest_checked_at))
+    : "never";
+}
+
+function paintAnalytics(a) {
+  $("uptime").textContent = a.uptime_percent == null ? "—" : `${a.uptime_percent}%`;
+  $("checks").textContent = a.total_checks;
+  for (const k of ["p50", "p95", "p99"]) {
+    const v = a[`${k}_response_ms`];
+    $(k).textContent = v == null ? "—" : `${Math.round(v)}ms`;
+  }
+
+  const tbody = $("incidents");
+  tbody.innerHTML = "";
+  if (!a.incidents.length) {
+    tbody.innerHTML = `<tr><td class="empty" colspan="5">No incidents in the last 7 days.</td></tr>`;
+    return;
+  }
+  for (const inc of a.incidents) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${fmt(inc.started_at)}</td><td>${fmt(inc.ended_at)}</td>`
+      + `<td>${duration(inc.duration_seconds)}</td><td>${inc.checks}</td><td>${inc.error ?? "—"}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+$("save").addEventListener("click", async () => {
+  const interval_seconds = Number($("interval").value);
+  await patch({ interval_seconds }, "save");
+});
+
+$("toggle").addEventListener("click", async () => {
+  await patch({ is_active: !endpoint.is_active }, "toggle");
+});
+
+async function patch(body, buttonId) {
+  $(buttonId).disabled = true;
+  setMessage("");
+  try {
+    endpoint = await api(`/endpoints/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    paintEndpoint(endpoint);
+  } catch (err) {
+    if (err.message !== "unauthorized") setMessage(err.message);
+  } finally {
+    $(buttonId).disabled = false;
+  }
+}
+
+$("delete").addEventListener("click", async () => {
+  if (!confirm(`Delete ${endpoint.url} and all its history?`)) return;
+  $("delete").disabled = true;
+  try {
+    await api(`/endpoints/${id}`, { method: "DELETE" });
+    location.replace("dashboard.html");
+  } catch (err) {
+    if (err.message !== "unauthorized") setMessage(err.message);
+    $("delete").disabled = false;
+  }
+});
+
+function fmt(iso) { return new Date(iso).toLocaleString(); }
+
+function duration(s) {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${(s / 3600).toFixed(1)}h`;
+  return `${(s / 86400).toFixed(1)}d`;
+}
+
+function ago(iso) {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+function setMessage(text) { $("message").textContent = text; }
+setInterval(() => { if (endpoint) paintEndpoint(endpoint); }, 1000);
+load();
+</script>
+</body>
+</html>

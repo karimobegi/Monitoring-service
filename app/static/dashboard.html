@@ -61,6 +61,8 @@
   @media (prefers-reduced-motion: reduce) { tr td { transition: none; } }
 
   .url { word-break: break-all; }
+  .url a { color: inherit; text-decoration: none; }
+  .url a:hover { text-decoration: underline; }
   .state { font-weight: 600; }
   .state.up { color: var(--up); }
   .state.down { color: var(--down); }
@@ -78,6 +80,9 @@
   <p class="sub">Snapshot over HTTP, changes over WebSocket.</p>
 
   <div class="bar">
+    <input id="url" type="url" placeholder="https://example.com/health" autocomplete="off">
+    <input id="interval" type="number" min="10" max="86400" value="60" style="flex:0 0 90px; min-width:0">
+    <button id="add">Add</button>
     <button id="signout">Sign out</button>
     <span class="conn" id="conn" data-state="idle"><span class="dot"></span><span id="connText">Not connected</span></span>
   </div>
@@ -143,6 +148,36 @@ async function begin() {
 }
 
 begin();
+
+$("add").addEventListener("click", addEndpoint);
+$("url").addEventListener("keydown", (e) => { if (e.key === "Enter") addEndpoint(); });
+
+async function addEndpoint() {
+  const url = $("url").value.trim();
+  const interval_seconds = Number($("interval").value);
+  if (!url) return setMessage("Enter a URL to monitor.");
+
+  $("add").disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/endpoints`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, interval_seconds }),
+    });
+    if (res.status === 401 || res.status === 403) return signOut();
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return setMessage(body.detail || `Could not add endpoint (HTTP ${res.status}).`);
+    }
+    $("url").value = "";
+    setMessage("");
+    await loadSnapshot();       // show it immediately rather than waiting for the poll
+  } catch {
+    setMessage("Could not reach the API.");
+  } finally {
+    $("add").disabled = false;
+  }
+}
 /* ---------- 1. snapshot over HTTP ---------- */
 
 async function loadSnapshot() {
@@ -247,7 +282,7 @@ function render(endpoints) {
 
     if (!row) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="url"></td><td class="state"></td><td class="code"></td><td class="age"></td>`;
+      tr.innerHTML = `<td class="url"><a></a></td><td class="state"></td><td class="code"></td><td class="age"></td>`;
       tbody.appendChild(tr);
       row = { endpoint: ep, status_code: null, checked_at: null, is_overdue: false, tr };
       rows.set(ep.id, row);
@@ -287,8 +322,10 @@ function paint(row) {
   const [urlCell, stateCell, codeCell, ageCell] = row.tr.children;
   const ep = row.endpoint;
 
-  urlCell.textContent = ep.name || ep.url || `endpoint ${ep.id}`;
-  urlCell.title = ep.url || "";
+  const link = urlCell.firstElementChild;
+  link.textContent = ep.url || `endpoint ${ep.id}`;
+  link.href = `endpoint.html?id=${ep.id}`;
+  link.title = ep.url || "";
 
   const state = healthOf(row.status_code, row.checked_at);
   stateCell.textContent = state === "up" ? "Up" : state === "down" ? "Down" : "Unknown";
