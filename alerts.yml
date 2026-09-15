@@ -1,0 +1,20 @@
+groups:
+  - name: uptime-monitor
+    rules:
+      - alert: ChecksStalled
+        expr: overdue_endpoints > 0
+        for: 5m
+        annotations:
+          summary: "{{ $value }} endpoint(s) have no recent check result"
+
+      - alert: WorkerDown
+        expr: up{job="worker"} == 0
+        for: 2m
+        annotations:
+          summary: "Celery worker is not being scraped"
+
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 2m
+        annotations:
+          summary: "API is not being scraped"

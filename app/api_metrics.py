@@ -20,3 +20,5 @@ RATE_LIMITED = Counter(
     "Requests rejected by a rate limit",
     ["limit"],
 )
+
+OVERDUE_ENDPOINTS = Gauge("overdue_endpoints", "Active endpoints with no recent check result")

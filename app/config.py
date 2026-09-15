@@ -25,3 +25,5 @@ MAX_ENDPOINTS_PER_USER = int(os.getenv("MAX_ENDPOINTS_PER_USER", "30"))
 OVERDUE_GRACE_SECONDS = int(os.getenv("OVERDUE_GRACE_SECONDS", "30"))
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 PURGE_BATCH_SIZE = int(os.getenv("PURGE_BATCH_SIZE", "10000"))
+
+ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"

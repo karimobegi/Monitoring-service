@@ -2,7 +2,7 @@
 # These override .env. Inside a container, localhost means that container,
 # so we point at the other services by name instead.
 x-app-env: &app-env
-  DATABASE_URL: postgresql://monitor:monitor@db:5432/monitor
+  DATABASE_URL: ${DATABASE_URL}
   REDIS_URL: redis://redis:6379/0
   SMTP_HOST: mailpit
   SMTP_PORT: "1025"
@@ -17,9 +17,9 @@ services:
   db:
     image: postgres:17
     environment:
-      POSTGRES_USER: monitor
-      POSTGRES_PASSWORD: monitor
-      POSTGRES_DB: monitor
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data   # data survives `docker compose down`
     healthcheck:
@@ -41,7 +41,7 @@ services:
   mailpit:
     image: axllent/mailpit    # catches alert emails
     ports:
-      - "8025:8025"           # web UI at http://localhost:8025
+      - "127.0.0.1:8025:8025"           # web UI at http://localhost:8025
 
   migrate:
     <<: *app
@@ -52,7 +52,7 @@ services:
 
   api:
     <<: *app
-    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     ports:
       - "8000:8000"
     depends_on: &after_migrate
@@ -73,7 +73,7 @@ services:
     tmpfs:
       - /tmp/prometheus:mode=1777       # recreated empty on every container start: no stale counts
     ports:
-      - "9808:9808"           # worker metrics, for curl from your Mac
+      - "127.0.0.1:9808:9808"           # worker metrics, for curl from your Mac
     depends_on: *after_migrate
     restart: unless-stopped
 
@@ -89,8 +89,9 @@ services:
     image: prom/prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
-      - "9090:9090"           # UI at http://localhost:9090
+      - "127.0.0.1:9090:9090"
     depends_on:
       - api
       - worker

@@ -5,6 +5,8 @@ from enum import Enum
 from urllib.parse import urlsplit
 from pydantic import field_validator, model_validator
 
+from app.ssrf import resolves_to_blocked_address
+
 def validate_check_url(value: str) -> str:
     value = value.strip()
     parts = urlsplit(value)
@@ -15,6 +17,8 @@ def validate_check_url(value: str) -> str:
         or len(value) > 2048
     ):
         raise ValueError("must be an http:// or https:// URL with a host")
+    if resolves_to_blocked_address(parts.hostname):
+        raise ValueError("URL resolves to a private or reserved address")
     return value
 
 class AlertChannel(str, Enum):

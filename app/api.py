@@ -12,12 +12,12 @@ from contextlib import asynccontextmanager
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.auth import get_password_hash, authenticate_user, create_access_token, Token, get_current_user
-from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db, get_endpoint_with_status, get_endpoint_incidents, get_endpoint_summary
+from app.db import get_session, add_endpoint, get_owned_endpoint, get_endpoints_with_status, update_endpoint_in_db, delete_endpoint_in_db, add_alert_to_db, get_alerts_per_owned_endpoint, get_owned_alert, update_alert_in_db, delete_alert_in_db, get_endpoint_with_status, get_endpoint_incidents, get_endpoint_summary, count_overdue_endpoints
 from app.models import User, UserCreate, UserRead, Endpoint, EndpointRead, EndpointCreate, EndpointUpdate, AlertConfigCreate, AlertConfigRead, AlertConfigUpdate, EndpointAnalytics
 from app.realtime import redis_subscriber, router as realtime_router
 from app.logging_config import configure_logging
-from app.api_metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
-from app.config import MAX_ENDPOINTS_PER_USER
+from app.api_metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS, OVERDUE_ENDPOINTS
+from app.config import MAX_ENDPOINTS_PER_USER, ALLOW_REGISTRATION
 from app.rate_limit import client_ip, enforce
 
 configure_logging()
@@ -58,11 +58,14 @@ async def record_request_metrics(request: Request, call_next):
 
 
 @app.get("/metrics", include_in_schema=False)
-def metrics() -> Response:
+def metrics(session: Session = Depends(get_session)) -> Response:
+    OVERDUE_ENDPOINTS.set(count_overdue_endpoints(session))
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/register", response_model=UserRead)
 def register(request: Request, user_create: UserCreate, session: Session = Depends(get_session)):
+    if not ALLOW_REGISTRATION:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed.")
     enforce("register_ip", client_ip(request), limit=5, window_seconds=3600)
     email = user_create.email.strip().lower()
     existing = session.exec(select(User).where(User.email == email)).first()

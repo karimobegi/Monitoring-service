@@ -39,6 +39,19 @@ def add_user(user: User, session: Session):
     session.add(user)
     session.commit()
 
+def count_overdue_endpoints(session: Session) -> int:
+    return session.execute(text("""
+        SELECT count(*)
+        FROM endpoint e
+        LEFT JOIN LATERAL (
+            SELECT checked_at FROM checkresult
+            WHERE endpoint_id = e.id ORDER BY checked_at DESC LIMIT 1
+        ) lr ON true
+        WHERE e.is_active
+          AND now() > GREATEST(lr.checked_at, e.monitoring_since)
+                      + (e.interval_seconds + :grace) * INTERVAL '1 second'
+    """), {"grace": OVERDUE_GRACE_SECONDS}).scalar_one()
+
 def add_endpoint(user_id: int, url: str, interval: int, session: Session):
     try:
         endpoint = Endpoint(user_id = user_id, url = url, interval_seconds = interval, next_check_at=datetime.now(timezone.utc)) #type: ignore

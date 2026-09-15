@@ -78,7 +78,7 @@ def perform_check(endpoint_id: int, url: str, checked_at: str):
     started = time.perf_counter()
     error = None
     try:
-        response = httpx.get(url, timeout=10.0)
+        response = httpx.get(url, timeout=10.0, follow_redirects=False)
         status_code = response.status_code
         response_time_ms = int(response.elapsed.total_seconds() * 1000)
     except httpx.TimeoutException:
