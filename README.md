@@ -6,7 +6,8 @@ something goes down and again when it recovers.
 
 Built with FastAPI, PostgreSQL, Celery and Redis, running as a Docker Compose stack.
 
-<!-- SCREENSHOT: dashboard with several endpoints, at least one down -->
+![alt text](<Screenshot1.png>)
+
 
 ## What it does
 
@@ -43,7 +44,7 @@ statement is what stops two dispatcher runs racing to check the same endpoint.
 When a check changes an endpoint's up/down state, the worker publishes to Redis. The API holds a
 subscriber that forwards the message to any WebSocket connected for that user.
 
-<!-- SCREENSHOT: endpoint detail page showing analytics and incidents -->
+![alt text](<Screenshot2.png>)
 
 ## Design decisions
 
@@ -181,7 +182,7 @@ metrics registry, so a plain Prometheus client exposes only one child's numbers.
 multiprocess mode with a shared tmpfs directory, and starts the metrics HTTP server once in the
 parent via the `worker_ready` signal.
 
-<!-- SCREENSHOT: Prometheus alerts page with ChecksStalled firing -->
+![alt text](<Screenshot3.png>)
 
 ## Running it
 
