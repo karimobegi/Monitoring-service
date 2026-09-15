@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, DateTime, ForeignKey, Index, desc, text as sa_text
 from enum import Enum
 from urllib.parse import urlsplit
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 def validate_check_url(value: str) -> str:
     value = value.strip()
@@ -125,6 +125,17 @@ class AlertConfigCreate(SQLModel):
     channel: AlertChannel
     target: str
     is_active: bool = Field(default = True)
+    @model_validator(mode="after")
+    def check_target_matches_channel(self):
+        self.target = self.target.strip()
+        if self.channel == AlertChannel.EMAIL:
+            # Deliberately loose: one @, something either side, no spaces.
+            local, _, domain = self.target.partition("@")
+            if not local or "." not in domain or any(c.isspace() for c in self.target):
+                raise ValueError("email target must be a valid email address")
+        elif self.channel == AlertChannel.WEBHOOK:
+            self.target = validate_check_url(self.target)
+        return self
 
 class AlertConfigRead(AlertConfigCreate):
     id: int | None

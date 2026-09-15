@@ -83,6 +83,22 @@
     <thead><tr><th>Started</th><th>Ended</th><th>Duration</th><th>Checks</th><th>Error</th></tr></thead>
     <tbody id="incidents"></tbody>
   </table>
+    <h2>Alerts</h2>
+  <div class="panel bar">
+    <select id="channel">
+      <option value="email">Email</option>
+      <option value="webhook">Webhook</option>
+    </select>
+    <input id="target" placeholder="ops@example.com" style="flex:1; min-width:200px">
+    <label for="threshold">after</label>
+    <input id="threshold" type="number" min="1" max="100" value="3" style="width:70px">
+    <label>failed checks</label>
+    <button id="addAlert">Add</button>
+  </div>
+  <table>
+    <thead><tr><th>Channel</th><th>Target</th><th>Threshold</th><th>Active</th><th></th></tr></thead>
+    <tbody id="alerts"></tbody>
+  </table>
 </main>
 
 <script>
@@ -112,7 +128,10 @@ async function api(path, options = {}) {
   if (res.status === 404) { location.replace("dashboard.html"); throw new Error("not found"); }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    const detail = typeof body.detail === "string" ? body.detail
+      : body.detail ? JSON.stringify(body.detail)
+      : `HTTP ${res.status}`;
+    throw new Error(detail);
   }
   return res.status === 204 ? null : res.json();
 }
@@ -123,6 +142,7 @@ async function load() {
     const [ep, analytics] = await Promise.all([
       api(`/endpoints/${id}`),
       api(`/endpoints/${id}/analytics`),
+      loadAlerts(),
     ]);
     endpoint = ep;
     paintEndpoint(ep);
@@ -229,6 +249,93 @@ function ago(iso) {
 
 function setMessage(text) { $("message").textContent = text; }
 setInterval(() => { if (endpoint) paintEndpoint(endpoint); }, 1000);
+// Swap the placeholder so the expected format is obvious before they type.
+$("channel").addEventListener("change", () => {
+  $("target").placeholder = $("channel").value === "email"
+    ? "ops@example.com" : "https://hooks.example.com/alert";
+});
+
+async function loadAlerts() {
+  const alerts = await api(`/endpoints/${id}/alerts`);
+  const tbody = $("alerts");
+  tbody.innerHTML = "";
+
+  if (!alerts.length) {
+    tbody.innerHTML = `<tr><td class="empty" colspan="5">No alerts. Add one to get notified when this endpoint goes down.</td></tr>`;
+    return;
+  }
+
+  for (const alert of alerts) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${alert.channel}</td><td class="target"></td>`
+      + `<td>${alert.threshold}</td><td><button class="toggle"></button></td>`
+      + `<td><button class="danger remove">Delete</button></td>`;
+
+    // textContent, not innerHTML: the target is user input and could contain markup.
+    tr.querySelector(".target").textContent = alert.target;
+    tr.querySelector(".toggle").textContent = alert.is_active ? "Active" : "Paused";
+    tr.querySelector(".toggle").addEventListener("click", () => toggleAlert(alert));
+    tr.querySelector(".remove").addEventListener("click", () => deleteAlert(alert));
+    tbody.appendChild(tr);
+  }
+}
+
+$("addAlert").addEventListener("click", async () => {
+  const target = $("target").value.trim();
+  if (!target) return setMessage("Enter a target for the alert.");
+
+  $("addAlert").disabled = true;
+  setMessage("");
+  try {
+    await api(`/endpoints/${id}/alerts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel: $("channel").value,
+        target,
+        threshold: Number($("threshold").value),
+      }),
+    });
+    $("target").value = "";
+    await loadAlerts();
+  } catch (err) {
+    if (err.message !== "unauthorized") setMessage(detailOf(err.message));
+  } finally {
+    $("addAlert").disabled = false;
+  }
+});
+
+async function toggleAlert(alert) {
+  try {
+    await api(`/endpoints/${id}/alerts/${alert.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !alert.is_active }),
+    });
+    await loadAlerts();
+  } catch (err) {
+    if (err.message !== "unauthorized") setMessage(detailOf(err.message));
+  }
+}
+
+async function deleteAlert(alert) {
+  if (!confirm(`Delete the ${alert.channel} alert to ${alert.target}?`)) return;
+  try {
+    await api(`/endpoints/${id}/alerts/${alert.id}`, { method: "DELETE" });
+    await loadAlerts();
+  } catch (err) {
+    if (err.message !== "unauthorized") setMessage(detailOf(err.message));
+  }
+}
+
+// FastAPI's 422 detail is an array of objects, not a string.
+function detailOf(message) {
+  try {
+    const parsed = JSON.parse(message);
+    if (Array.isArray(parsed)) return parsed[0]?.msg ?? message;
+  } catch { /* not JSON, use as-is */ }
+  return message;
+}
 load();
 </script>
 </body>
