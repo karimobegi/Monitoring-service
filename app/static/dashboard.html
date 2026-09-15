@@ -98,8 +98,8 @@
 </main>
 
 <script>
-const API_BASE = "http://localhost:8000";
-const WS_BASE  = "ws://localhost:8000/ws";
+const API_BASE = "";
+const WS_BASE  = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 30_000;
