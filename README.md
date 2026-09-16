@@ -6,6 +6,12 @@ something goes down and again when it recovers.
 
 Built with FastAPI, PostgreSQL, Celery and Redis, running as a Docker Compose stack.
 
+**Live demo:**
+https://uptimemonitoringservice.dev/
+
+Sign in as `demo@example.com` / `demo_password_123`. Registration is closed;
+see the note on SSRF below for why.
+
 ![alt text](<Screenshot1.png>)
 
 ## What it does
@@ -295,7 +301,7 @@ current one. `ps aux | grep celery` before starting work became a habit.
 `docker compose run --rm` wrote the file into a container that was then deleted. The versions
 directory needs a bind mount, or the migration needs writing by hand.
 
-## Running it
+## Running it locally
 
 ```bash
 cp .env.example .env     # then fill in SECRET_KEY, POSTGRES_PASSWORD, DATABASE_URL
@@ -325,6 +331,21 @@ pytest
 Tests run against a local PostgreSQL rather than the container, because the dispatcher uses
 Postgres-specific SQL that SQLite cannot stand in for. The schema is built by running the real
 migration chain, so a broken migration fails the suite.
+
+## Deployment
+
+Runs on a single Google Cloud Compute Engine VM (e2-small, 2 vCPU / 2 GB,
+Ubuntu 24.04) with the same Compose stack used locally — no separate
+production configuration.
+
+Caddy sits in front as a reverse proxy, obtaining and renewing TLS
+certificates from Let's Encrypt automatically. It is the only service bound
+to a public interface: the API listens on loopback only and is reached over
+the Compose network, so there is no way to bypass TLS or to reach uvicorn
+directly and forge `X-Forwarded-For` headers past the rate limiter. Mailpit,
+Prometheus and the worker's metrics port are likewise bound to loopback and
+reachable only over an SSH tunnel. `/metrics` is served to Prometheus inside
+the network but returns 404 at the proxy.
 
 ## What I would do next
 

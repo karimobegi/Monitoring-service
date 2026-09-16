@@ -29,6 +29,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   redis:
     image: redis:7
@@ -37,11 +38,13 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   mailpit:
     image: axllent/mailpit    # catches alert emails
     ports:
-      - "127.0.0.1:8025:8025"           # web UI at http://localhost:8025
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
 
   migrate:
     <<: *app
@@ -54,7 +57,7 @@ services:
     <<: *app
     command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on: &after_migrate
       migrate:
         condition: service_completed_successfully
@@ -95,6 +98,22 @@ services:
     depends_on:
       - api
       - worker
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
